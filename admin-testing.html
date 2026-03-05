@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Testing - Admin Dashboard</title>
+    <link rel="stylesheet" href="admin-styles.css">
+    <style>
+        .test-suite {
+            margin-bottom: 30px;
+        }
+        .test-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .test-info {
+            flex: 1;
+        }
+        .test-name {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .test-description {
+            font-size: 0.875em;
+            color: var(--text-secondary);
+        }
+        .test-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .test-result {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 8px;
+            display: none;
+        }
+        .test-result.show {
+            display: block;
+        }
+        .test-result.success {
+            background: #d1fae5;
+            border-left: 4px solid var(--success);
+        }
+        .test-result.error {
+            background: #fee2e2;
+            border-left: 4px solid var(--error);
+        }
+        .test-result.running {
+            background: #eff6ff;
+            border-left: 4px solid var(--info);
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <span>⚙️</span>
+                <span>Scenario Builder Admin</span>
+            </div>
+            <div class="nav-links">
+                <a href="admin-dashboard.html" class="nav-link">
+                    <span>📊</span>
+                    <span>Overview</span>
+                </a>
+                <a href="admin-components.html" class="nav-link">
+                    <span>🧩</span>
+                    <span>Components</span>
+                </a>
+                <a href="admin-testing.html" class="nav-link active">
+                    <span>🧪</span>
+                    <span>Testing</span>
+                </a>
+                <a href="admin-monitoring.html" class="nav-link">
+                    <span>📈</span>
+                    <span>Monitoring</span>
+                </a>
+                <a href="admin-config.html" class="nav-link">
+                    <span>⚙️</span>
+                    <span>Configuration</span>
+                </a>
+            </div>
+            <div class="nav-status">
+                <span class="status-indicator"></span>
+                <span id="systemStatus">System Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <div class="page-header">
+            <h1 class="page-title">Testing & Validation</h1>
+            <p class="page-subtitle">Тестирование компонентов системы и проверка перед релизом</p>
+        </div>
+
+        <!-- Pre-Release Checklist -->
+        <div class="section-card" id="pre-release">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">✅</span>
+                    Pre-Release Checklist
+                </h2>
+            </div>
+            <div id="preReleaseChecklist">
+                <div class="test-item">
+                    <div class="test-info">
+                        <div class="test-name">Все компоненты работают</div>
+                        <div class="test-description">Проверка статуса всех системных компонентов</div>
+                    </div>
+                    <div class="test-actions">
+                        <button class="action-btn" onclick="checkComponents()">Проверить</button>
+                    </div>
+                    <div class="test-result" id="checkComponentsResult"></div>
+                </div>
+                <div class="test-item">
+                    <div class="test-info">
+                        <div class="test-name">Agent Runtime тестирование</div>
+                        <div class="test-description">Проверка работы Agent Runtime с различными запросами</div>
+                    </div>
+                    <div class="test-actions">
+                        <a href="test-agent.html" class="action-btn">Открыть тест →</a>
+                    </div>
+                </div>
+                <div class="test-item">
+                    <div class="test-info">
+                        <div class="test-name">Orchestrator тестирование</div>
+                        <div class="test-description">Проверка выполнения workflow через Orchestrator</div>
+                    </div>
+                    <div class="test-actions">
+                        <a href="test-orchestrator.html" class="action-btn">Открыть тест →</a>
+                    </div>
+                </div>
+                <div class="test-item">
+                    <div class="test-info">
+                        <div class="test-name">Event Bus тестирование</div>
+                        <div class="test-description">Проверка публикации и подписки на события</div>
+                    </div>
+                    <div class="test-actions">
+                        <a href="test-event-bus.html" class="action-btn">Открыть тест →</a>
+                    </div>
+                </div>
+                <div class="test-item">
+                    <div class="test-info">
+                        <div class="test-name">Observability метрики</div>
+                        <div class="test-description">Проверка сбора метрик и трассировки</div>
+                    </div>
+                    <div class="test-actions">
+                        <a href="observability-dashboard.html" class="action-btn">Открыть →</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Component Tests -->
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">🧪</span>
+                    Component Tests
+                </h2>
+            </div>
+            <div class="test-suite">
+                <div class="test-item">
+                    <div class="test-info">
+                        <div class="test-name">Scenario Spec Validation</div>
+                        <div class="test-description">Проверка валидации спецификаций сценариев</div>
+                    </div>
+                    <div class="test-actions">
+                        <button class="action-btn" onclick="runTest('spec-validation')">Запустить</button>
+                    </div>
+                    <div class="test-result" id="test-spec-validation"></div>
+                </div>
+                <div class="test-item">
+                    <div class="test-info">
+                        <div class="test-name">Tool Registry</div>
+                        <div class="test-description">Проверка регистрации и поиска инструментов</div>
+                    </div>
+                    <div class="test-actions">
+                        <button class="action-btn" onclick="runTest('tool-registry')">Запустить</button>
+                    </div>
+                    <div class="test-result" id="test-tool-registry"></div>
+                </div>
+                <div class="test-item">
+                    <div class="test-info">
+                        <div class="test-name">Tool Gateway</div>
+                        <div class="test-description">Проверка контроля доступа и rate limiting</div>
+                    </div>
+                    <div class="test-actions">
+                        <button class="action-btn" onclick="runTest('tool-gateway')">Запустить</button>
+                    </div>
+                    <div class="test-result" id="test-tool-gateway"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Integration Tests -->
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">🔗</span>
+                    Integration Tests
+                </h2>
+            </div>
+            <div class="test-suite">
+                <div class="test-item">
+                    <div class="test-info">
+                        <div class="test-name">Agent + Orchestrator Integration</div>
+                        <div class="test-description">Проверка интеграции Agent Runtime с Orchestrator</div>
+                    </div>
+                    <div class="test-actions">
+                        <button class="action-btn" onclick="runIntegrationTest('agent-orchestrator')">Запустить</button>
+                    </div>
+                    <div class="test-result" id="test-agent-orchestrator"></div>
+                </div>
+                <div class="test-item">
+                    <div class="test-info">
+                        <div class="test-name">Event Bus Integration</div>
+                        <div class="test-description">Проверка публикации событий из Orchestrator</div>
+                    </div>
+                    <div class="test-actions">
+                        <button class="action-btn" onclick="runIntegrationTest('event-bus')">Запустить</button>
+                    </div>
+                    <div class="test-result" id="test-event-bus"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="admin-common.js"></script>
+    <script>
+        async function checkComponents() {
+            const resultEl = document.getElementById('checkComponentsResult');
+            resultEl.className = 'test-result show running';
+            resultEl.innerHTML = '<strong>Проверка компонентов...</strong>';
+
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                const okCount = data.summary?.ok || 0;
+                const totalCount = data.summary?.total || 0;
+
+                if (okCount === totalCount && totalCount > 0) {
+                    resultEl.className = 'test-result show success';
+                    resultEl.innerHTML = `<strong>✓ Успешно:</strong> Все ${totalCount} компонентов работают корректно`;
+                } else {
+                    resultEl.className = 'test-result show error';
+                    resultEl.innerHTML = `<strong>✗ Ошибка:</strong> ${okCount}/${totalCount} компонентов работают`;
+                }
+            } catch (error) {
+                resultEl.className = 'test-result show error';
+                resultEl.innerHTML = `<strong>✗ Ошибка:</strong> ${error.message}`;
+            }
+        }
+
+        async function runTest(testName) {
+            const resultEl = document.getElementById(`test-${testName}`);
+            resultEl.className = 'test-result show running';
+            resultEl.innerHTML = '<strong>Запуск теста...</strong>';
+
+            // TODO: Реализовать реальные тесты через API
+            setTimeout(() => {
+                resultEl.className = 'test-result show success';
+                resultEl.innerHTML = '<strong>✓ Тест пройден</strong> (заглушка)';
+            }, 1000);
+        }
+
+        async function runIntegrationTest(testName) {
+            const resultEl = document.getElementById(`test-${testName}`);
+            resultEl.className = 'test-result show running';
+            resultEl.innerHTML = '<strong>Запуск интеграционного теста...</strong>';
+
+            // TODO: Реализовать реальные интеграционные тесты
+            setTimeout(() => {
+                resultEl.className = 'test-result show success';
+                resultEl.innerHTML = '<strong>✓ Интеграционный тест пройден</strong> (заглушка)';
+            }, 2000);
+        }
+    </script>
+</body>
+</html>

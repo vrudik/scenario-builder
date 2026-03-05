@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Scenario Builder</title>
+    <link rel="stylesheet" href="admin-styles.css">
+    <style>
+        /* Дополнительные стили для workflow steps */
+        .workflow-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .workflow-step {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-light);
+            border-radius: 8px;
+        }
+
+        .step-number {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-title {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .step-description {
+            font-size: 0.875em;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <span>⚙️</span>
+                <span>Scenario Builder Admin</span>
+            </div>
+            <div class="nav-links">
+                <a href="admin-dashboard.html" class="nav-link active">
+                    <span>📊</span>
+                    <span>Overview</span>
+                </a>
+                <a href="admin-components.html" class="nav-link">
+                    <span>🧩</span>
+                    <span>Components</span>
+                </a>
+                <a href="admin-testing.html" class="nav-link">
+                    <span>🧪</span>
+                    <span>Testing</span>
+                </a>
+                <a href="admin-monitoring.html" class="nav-link">
+                    <span>📈</span>
+                    <span>Monitoring</span>
+                </a>
+                <a href="admin-config.html" class="nav-link">
+                    <span>⚙️</span>
+                    <span>Configuration</span>
+                </a>
+            </div>
+            <div class="nav-status">
+                <span class="status-indicator"></span>
+                <span id="systemStatus">System Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-container">
+        <!-- Page Header -->
+        <div class="page-header">
+            <h1 class="page-title">System Overview</h1>
+            <p class="page-subtitle">Мониторинг состояния системы и быстрый доступ к инструментам</p>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="quick-stats">
+            <div class="stat-card">
+                <div class="stat-label">Компоненты</div>
+                <div class="stat-value" id="componentsTotal">-</div>
+                <div class="stat-change" id="componentsStatus">Загрузка...</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Активные выполнения</div>
+                <div class="stat-value" id="activeExecutions">0</div>
+                <div class="stat-change">За последний час</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Успешность</div>
+                <div class="stat-value" id="successRate">-</div>
+                <div class="stat-change" id="successRateChange">За последний час</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Средняя задержка</div>
+                <div class="stat-value" id="avgLatency">-</div>
+                <div class="stat-change">мс</div>
+            </div>
+        </div>
+
+        <!-- System Health -->
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">🏥</span>
+                    System Health
+                </h2>
+            </div>
+            <div id="systemHealth">
+                <div class="alert info">
+                    <strong>Проверка состояния системы...</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">⚡</span>
+                    Quick Actions
+                </h2>
+            </div>
+            <div class="action-grid">
+                <a href="admin-testing.html" class="action-btn">
+                    <span>🧪</span>
+                    <span>Run Tests</span>
+                </a>
+                <a href="admin-monitoring.html" class="action-btn secondary">
+                    <span>📈</span>
+                    <span>View Metrics</span>
+                </a>
+                <a href="test-agent.html" class="action-btn success">
+                    <span>🤖</span>
+                    <span>Test Agent</span>
+                </a>
+                <a href="test-orchestrator.html" class="action-btn success">
+                    <span>🔄</span>
+                    <span>Test Orchestrator</span>
+                </a>
+                <a href="test-event-bus.html" class="action-btn success">
+                    <span>📡</span>
+                    <span>Test Event Bus</span>
+                </a>
+                <a href="observability-dashboard.html" class="action-btn warning">
+                    <span>📊</span>
+                    <span>Observability</span>
+                </a>
+            </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">📋</span>
+                    Recent Activity
+                </h2>
+            </div>
+            <div id="recentActivity">
+                <div class="alert info">Загрузка активности...</div>
+            </div>
+        </div>
+
+        <!-- System Workflow -->
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">🔄</span>
+                    Development Workflow
+                </h2>
+            </div>
+            <div class="workflow-steps">
+                <div class="workflow-step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <div class="step-title">Настройка и конфигурация</div>
+                        <div class="step-description">Проверьте конфигурацию системы, настройте инструменты и подключения</div>
+                    </div>
+                    <a href="admin-config.html" class="action-btn" style="padding: 8px 16px; font-size: 0.875em;">Настроить →</a>
+                </div>
+                <div class="workflow-step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <div class="step-title">Тестирование компонентов</div>
+                        <div class="step-description">Протестируйте каждый компонент системы перед интеграцией</div>
+                    </div>
+                    <a href="admin-testing.html" class="action-btn" style="padding: 8px 16px; font-size: 0.875em;">Тестировать →</a>
+                </div>
+                <div class="workflow-step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <div class="step-title">Мониторинг и диагностика</div>
+                        <div class="step-description">Отслеживайте метрики, логи и трассировки для выявления проблем</div>
+                    </div>
+                    <a href="admin-monitoring.html" class="action-btn" style="padding: 8px 16px; font-size: 0.875em;">Мониторить →</a>
+                </div>
+                <div class="workflow-step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <div class="step-title">Проверка перед релизом</div>
+                        <div class="step-description">Убедитесь, что все компоненты работают корректно и нет критических проблем</div>
+                    </div>
+                    <a href="admin-testing.html#pre-release" class="action-btn warning" style="padding: 8px 16px; font-size: 0.875em;">Проверить →</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="admin-common.js"></script>
+    <script>
+        // Загрузка данных системы
+        async function loadSystemData() {
+            try {
+                // Загрузка статуса компонентов
+                const statusResponse = await fetch('/api/status');
+                const statusData = await statusResponse.json();
+                
+                // Обновление статистики
+                document.getElementById('componentsTotal').textContent = statusData.summary?.total || 0;
+                const okCount = statusData.summary?.ok || 0;
+                const totalCount = statusData.summary?.total || 0;
+                document.getElementById('componentsStatus').textContent = `${okCount}/${totalCount} работают`;
+                document.getElementById('componentsStatus').className = okCount === totalCount ? 'stat-change positive' : 'stat-change negative';
+
+                // Обновление System Health
+                const healthHtml = statusData.components?.map(comp => `
+                    <div class="component-item">
+                        <div class="component-info">
+                            <span class="component-name">${comp.name}</span>
+                            <span class="component-path">${comp.file}</span>
+                        </div>
+                        <span class="status-badge ${comp.status === 'ok' ? 'success' : 'error'}">
+                            ${comp.status === 'ok' ? '✓ Работает' : '✗ Ошибка'}
+                        </span>
+                    </div>
+                `).join('') || '<div class="alert warning">Не удалось загрузить статус компонентов</div>';
+                
+                document.getElementById('systemHealth').innerHTML = healthHtml;
+
+                // Загрузка метрик
+                const metricsResponse = await fetch('/api/metrics');
+                const metricsText = await metricsResponse.text();
+                const metrics = parsePrometheusMetrics(metricsText);
+                
+                if (metrics.scenario_executions_total) {
+                    const total = metrics.scenario_executions_total;
+                    const success = metrics.scenario_success_total || 0;
+                    const rate = total > 0 ? Math.round((success / total) * 100) : 0;
+                    document.getElementById('successRate').textContent = rate + '%';
+                    document.getElementById('successRateChange').className = rate >= 95 ? 'stat-change positive' : 'stat-change negative';
+                }
+
+            } catch (error) {
+                console.error('Error loading system data:', error);
+                document.getElementById('systemHealth').innerHTML = 
+                    '<div class="alert error">Ошибка загрузки данных: ' + error.message + '</div>';
+            }
+        }
+
+        // Парсинг Prometheus метрик
+        function parsePrometheusMetrics(text) {
+            const metrics = {};
+            const lines = text.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+            lines.forEach(line => {
+                const match = line.match(/^(\w+)\s+([\d.]+)/);
+                if (match) {
+                    metrics[match[1]] = parseFloat(match[2]);
+                }
+            });
+            return metrics;
+        }
+
+        // Загрузка при старте
+        window.addEventListener('load', () => {
+            loadSystemData();
+            setInterval(loadSystemData, 10000); // Обновление каждые 10 секунд
+        });
+    </script>
+</body>
+</html>

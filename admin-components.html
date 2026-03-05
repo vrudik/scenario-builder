@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Components - Admin Dashboard</title>
+    <link rel="stylesheet" href="admin-styles.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <span>⚙️</span>
+                <span>Scenario Builder Admin</span>
+            </div>
+            <div class="nav-links">
+                <a href="admin-dashboard.html" class="nav-link">
+                    <span>📊</span>
+                    <span>Overview</span>
+                </a>
+                <a href="admin-components.html" class="nav-link active">
+                    <span>🧩</span>
+                    <span>Components</span>
+                </a>
+                <a href="admin-testing.html" class="nav-link">
+                    <span>🧪</span>
+                    <span>Testing</span>
+                </a>
+                <a href="admin-monitoring.html" class="nav-link">
+                    <span>📈</span>
+                    <span>Monitoring</span>
+                </a>
+                <a href="admin-config.html" class="nav-link">
+                    <span>⚙️</span>
+                    <span>Configuration</span>
+                </a>
+            </div>
+            <div class="nav-status">
+                <span class="status-indicator"></span>
+                <span id="systemStatus">System Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <div class="page-header">
+            <h1 class="page-title">System Components</h1>
+            <p class="page-subtitle">Детальный статус и диагностика всех компонентов системы</p>
+        </div>
+
+        <div id="componentsList" class="section-grid">
+            <!-- Компоненты будут загружены динамически -->
+        </div>
+    </div>
+
+    <script src="admin-common.js"></script>
+    <script>
+        async function loadComponents() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                const componentsHtml = data.components?.map(comp => `
+                    <div class="section-card">
+                        <div class="section-header">
+                            <h2 class="section-title">
+                                <span class="section-icon">${getComponentIcon(comp.name)}</span>
+                                ${comp.name}
+                            </h2>
+                            <span class="status-badge ${comp.status === 'ok' ? 'success' : 'error'}">
+                                ${comp.status === 'ok' ? '✓ Operational' : '✗ Error'}
+                            </span>
+                        </div>
+                        <div class="component-details">
+                            <div class="detail-row">
+                                <span class="detail-label">File:</span>
+                                <code class="detail-value">${comp.file}</code>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">Status:</span>
+                                <span class="detail-value">${comp.status === 'ok' ? 'Working' : 'Error'}</span>
+                            </div>
+                            <div class="action-grid" style="margin-top: 16px;">
+                                <a href="${getComponentTestLink(comp.name)}" class="action-btn">
+                                    <span>🧪</span>
+                                    <span>Test</span>
+                                </a>
+                                <a href="${getComponentDocsLink(comp.name)}" class="action-btn secondary">
+                                    <span>📖</span>
+                                    <span>Docs</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                `).join('') || '<div class="alert warning">No components found</div>';
+                
+                document.getElementById('componentsList').innerHTML = componentsHtml;
+            } catch (error) {
+                document.getElementById('componentsList').innerHTML = 
+                    '<div class="alert error">Error loading components: ' + error.message + '</div>';
+            }
+        }
+
+        function getComponentIcon(name) {
+            const icons = {
+                'Scenario Spec': '📋',
+                'Scenario Builder': '🔨',
+                'Tool Registry': '📦',
+                'Tool Gateway': '🚪',
+                'Runtime Orchestrator': '🔄'
+            };
+            return icons[name] || '🧩';
+        }
+
+        function getComponentTestLink(name) {
+            const links = {
+                'Runtime Orchestrator': 'test-orchestrator.html',
+                'Tool Gateway': 'test-agent.html'
+            };
+            return links[name] || 'admin-testing.html';
+        }
+
+        function getComponentDocsLink(name) {
+            return '#'; // TODO: добавить ссылки на документацию
+        }
+
+        window.addEventListener('load', loadComponents);
+    </script>
+</body>
+</html>

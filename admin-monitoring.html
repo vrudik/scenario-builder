@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoring - Admin Dashboard</title>
+    <link rel="stylesheet" href="admin-styles.css">
+    <style>
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .metric-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .metric-label {
+            font-size: 0.875em;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .metric-value {
+            font-size: 2em;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .metric-trend {
+            font-size: 0.875em;
+            margin-top: 4px;
+        }
+        .log-viewer {
+            background: #1f2937;
+            color: #f9fafb;
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875em;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 16px;
+        }
+        .log-entry {
+            margin-bottom: 4px;
+            padding: 4px 0;
+        }
+        .log-entry.error { color: #fca5a5; }
+        .log-entry.warn { color: #fcd34d; }
+        .log-entry.info { color: #93c5fd; }
+        .log-entry.success { color: #86efac; }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <span>⚙️</span>
+                <span>Scenario Builder Admin</span>
+            </div>
+            <div class="nav-links">
+                <a href="admin-dashboard.html" class="nav-link">
+                    <span>📊</span>
+                    <span>Overview</span>
+                </a>
+                <a href="admin-components.html" class="nav-link">
+                    <span>🧩</span>
+                    <span>Components</span>
+                </a>
+                <a href="admin-testing.html" class="nav-link">
+                    <span>🧪</span>
+                    <span>Testing</span>
+                </a>
+                <a href="admin-monitoring.html" class="nav-link active">
+                    <span>📈</span>
+                    <span>Monitoring</span>
+                </a>
+                <a href="admin-config.html" class="nav-link">
+                    <span>⚙️</span>
+                    <span>Configuration</span>
+                </a>
+            </div>
+            <div class="nav-status">
+                <span class="status-indicator"></span>
+                <span id="systemStatus">System Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <div class="page-header">
+            <h1 class="page-title">Monitoring & Diagnostics</h1>
+            <p class="page-subtitle">Мониторинг метрик, логов и трассировок системы</p>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="action-grid" style="margin-bottom: 30px;">
+            <a href="observability-dashboard.html" class="action-btn">
+                <span>📊</span>
+                <span>Open Observability Dashboard</span>
+            </a>
+            <a href="test-event-bus.html" class="action-btn secondary">
+                <span>📡</span>
+                <span>Event Bus Monitor</span>
+            </a>
+        </div>
+
+        <!-- Metrics Overview -->
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">📈</span>
+                    Key Metrics
+                </h2>
+            </div>
+            <div class="metrics-grid" id="metricsGrid">
+                <div class="metric-card">
+                    <div class="metric-label">Total Executions</div>
+                    <div class="metric-value" id="metricExecutions">-</div>
+                    <div class="metric-trend">Last hour</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Success Rate</div>
+                    <div class="metric-value" id="metricSuccessRate">-</div>
+                    <div class="metric-trend">Last hour</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Avg Latency</div>
+                    <div class="metric-value" id="metricLatency">-</div>
+                    <div class="metric-trend">ms</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Active Executions</div>
+                    <div class="metric-value" id="metricActive">0</div>
+                    <div class="metric-trend">Currently running</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Logs -->
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">📋</span>
+                    System Logs
+                </h2>
+            </div>
+            <div class="log-viewer" id="logViewer">
+                <div class="log-entry info">Загрузка логов...</div>
+            </div>
+        </div>
+
+        <!-- Event Stream -->
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">📡</span>
+                    Recent Events
+                </h2>
+            </div>
+            <div id="recentEvents">
+                <div class="alert info">Загрузка событий...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="admin-common.js"></script>
+    <script>
+        async function loadMetrics() {
+            try {
+                const response = await fetch('/api/metrics');
+                const text = await response.text();
+                const metrics = parsePrometheusMetrics(text);
+
+                if (metrics.scenario_executions_total) {
+                    document.getElementById('metricExecutions').textContent = 
+                        Math.round(metrics.scenario_executions_total);
+                }
+
+                if (metrics.scenario_executions_total && metrics.scenario_success_total) {
+                    const rate = Math.round((metrics.scenario_success_total / metrics.scenario_executions_total) * 100);
+                    document.getElementById('metricSuccessRate').textContent = rate + '%';
+                }
+
+                if (metrics.scenario_duration_ms) {
+                    document.getElementById('metricLatency').textContent = 
+                        Math.round(metrics.scenario_duration_ms);
+                }
+            } catch (error) {
+                console.error('Error loading metrics:', error);
+            }
+        }
+
+        function parsePrometheusMetrics(text) {
+            const metrics = {};
+            const lines = text.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+            lines.forEach(line => {
+                const match = line.match(/^(\w+)\s+([\d.]+)/);
+                if (match) {
+                    metrics[match[1]] = parseFloat(match[2]);
+                }
+            });
+            return metrics;
+        }
+
+        async function loadRecentEvents() {
+            try {
+                const response = await fetch('/api/event-bus/events?limit=10');
+                const data = await response.json();
+                
+                if (data.events && data.events.length > 0) {
+                    const eventsHtml = data.events.map(event => `
+                        <div class="component-item">
+                            <div class="component-info">
+                                <span class="component-name">${event.type}</span>
+                                <span class="component-path">${new Date(event.metadata?.timestamp || '').toLocaleString()}</span>
+                            </div>
+                        </div>
+                    `).join('');
+                    document.getElementById('recentEvents').innerHTML = eventsHtml;
+                } else {
+                    document.getElementById('recentEvents').innerHTML = 
+                        '<div class="alert info">Нет событий</div>';
+                }
+            } catch (error) {
+                document.getElementById('recentEvents').innerHTML = 
+                    '<div class="alert error">Ошибка загрузки событий: ' + error.message + '</div>';
+            }
+        }
+
+        // Обновление данных
+        window.addEventListener('load', () => {
+            loadMetrics();
+            loadRecentEvents();
+            setInterval(() => {
+                loadMetrics();
+                loadRecentEvents();
+            }, 10000); // Каждые 10 секунд
+        });
+    </script>
+</body>
+</html>
