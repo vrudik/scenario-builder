@@ -1,0 +1,297 @@
+Конструктор автономных сценариев и агентных процессов: принципы, план реализации, ТЗ и инвест-питч
+Принципы и архитектура системы
+Продуктовая цель и рамка "двух контуров"
+Система, которую вы описали, по сути является "фабрикой автономных сценариев": человек задаёт intent + ограничения, а платформа сама превращает это в исполняемый и управляемый артефакт, выполняет его в продакшене и автоматически контролирует качество, стоимость и риски. Такой подход естественно раскладывается на два контура:
+* Build-time: спецификация > компиляция > тесты/эвалиации > деплой по гейтам
+* Run-time: event-driven исполнение > durable orchestration > agent runtime (tool calling + память) > наблюдаемость и автоматические контролы
+Ключевая инженерная ставка здесь - на durable orchestration (чтобы сценарии были устойчивы к падениям/таймаутам/дублям) и на политики/гейты (чтобы автономность не разрушала безопасность и бизнес-метрики). Концептуально это совпадает с тем, как современные workflow-движки обеспечивают "воспроизводимое выполнение" и восстановление по истории событий: например, у workflow-платформ идея durable execution реализуется через хранение истории событий, позволяя продолжать выполнение после сбоев. [1]
+Архитектурные принципы, которые нужно "зашить в ДНК"
+Ниже - принципы, которые не стоит делать опциональными: если их не заложить сразу, "автономность" почти неизбежно превратится в ручные костыли, инциденты и регрессии.
+Spec-as-Source-of-Truth (декларативность и воспроизводимость).
+Единственный "источник правды" - версия Scenario Spec (в Git/репозитории артефактов). Любое изменение в поведении должно быть объяснимо как изменение Spec/шаблона/политики/версии tool-контракта. Это критично для регрессий, аудита и безопасного масштабирования сценариев в сотни/тысячи вариантов. (Эта мысль также согласуется с регуляторными ожиданиями к управляемости и трассируемости AI-систем, где важны процессы управления и контроля по всему жизненному циклу.) [2]
+Orchestration-first: durable state и "компенсации вместо надежды".
+Run-time должен опираться не на "best effort" микросервисные цепочки, а на движок, который хранит состояние и прогресс выполнения и обеспечивает восстановление после сбоев. Для этого используются механизмы вроде event history (история событий выполнения) и правила повторов/таймаутов. [1]
+Для длинных бизнес-транзакций в распределённых системах нужно проектировать "saga-мышление": последовательность локальных транзакций с компенсирующими операциями при ошибках. [3]
+Event-driven как транспорт, contract-driven как дисциплина.
+"Шина событий" нужна не только для триггеров, но и как единая ткань наблюдаемости и интеграций. В терминах event streaming это означает захват событий в real-time, их долговременное хранение и обработку/реакцию в потоке. [4]
+Практически это приводит к строгим требованиям: schema registry/версирование контрактов, дедупликация, идемпотентность, ключи корреляции, DLQ и poison-message стратегии.
+SLO-управление как автоматический "педальный узел" релизов и автономности.
+SLO - это измеримая цель по SLI (latency, success rate и т. п.). [5]
+Ваша CI/CD-логика (canary/shadow/rollout/rollback) должна быть привязана к error budget: канареечные релизы - классический способ "экономить" бюджет ошибок, ограничивая радиус поражения. [6]
+Observability-by-default: трассы + метрики + логи, корреляция end-to-end.
+Для сложной event-driven/agent-платформы "наблюдаемость" - не UI-приятность, а основа управляемости. OpenTelemetry как стандартный подход объединяет сигналы (traces/metrics/logs) и позволяет коррелировать их между собой, включая распределённый контекст. [7]
+Security & AI-safety-by-construction (не "после").
+- Zero Trust: непрерывная проверка доступа, контекстные политики, принцип наименьших привилегий. [8]
+- Для API-слоя важны типовые риски вроде Broken Object Level Authorization: если сценарии/агенты получают доступ к объектам по ID, контроль доступа обязан быть объектным и систематическим. [9]
+- Для agentic-части нужно проектировать защиту от Prompt Injection, Insecure Output Handling, Excessive Agency и т. п. - эти риски выделяются как ключевые в списках угроз для LLM-приложений. [10]
+Соответствие требованиям по данным и регуляторике как "системная функция".
+Если вы находитесь в контуре European Union[11] или делаете продукт для банков/финтеха, нельзя откладывать комплаенс. GDPR задаёт принципы законности/прозрачности и др. в обработке персональных данных. [12]
+Кроме того, European Commission[13] фиксирует таймлайн применимости AI Act: акт вступил в силу 1 августа 2024 года и становится полностью применимым 2 августа 2026 (с исключениями и промежуточными датами). [14]
+Это напрямую влияет на требования к governance, документации, управлению рисками и "человеческому вмешательству" в критических сценариях (особенно при high-risk применениях). [15]
+Tooling-контур как "надёжный контракт", а не хаотичный набор интеграций.
+В LLM-системах вызов инструментов - это многошаговый протокол: модель предлагает tool-call, приложение исполняет, возвращает результат, модель продолжает. [16]
+Если вы строите MCP-подобный слой, важно помнить: протоколы tool-взаимодействия подчёркивают, что инструменты - это фактически произвольное выполнение кода и требуют осторожности и явных контролей. [17]
+Целевая архитектура: контрольная плоскость и плоскость выполнения
+Практичным способом описать целевую архитектуру будет разделение на Control Plane (конструирование/политики/релизы) и Data Plane (исполнение/события/агенты).
+Control Plane (Build-time)
+1) Scenario Spec Service: хранение/версирование Spec, статическая валидация схемы, управление risk-классом и NFR.
+2) Template Library: библиотека типовых паттернов (saga, approval, async callbacks, CRM-флоу, antifraud и т. п.) - "скелеты" сценариев, которые Builder специализирует.
+3) Scenario Builder/Compiler: Spec > workflow graph (state machine/DAG), генерация конфигурации agent-ролей, привязка tool-контрактов, генерация тестов и policy-пакета.
+4) Tool Registry + Tool Gateway: единый каталог инструментов с типами входов/выходов, SLA, rate limits, правами и аудитом; gateway как enforcement-точка. (Идеологически близко к MCP-подходу: унифицировать доступ и безопасность tool-слоя.) [18]
+5) Policy Engine: декларативные политики (allow/deny, approvals, PII-маскирование, cost-guard), которые применяются в рантайме и в CI гейтах; здесь удобно использовать унифицированный движок политик наподобие OPA для enforcement "по всему стеку". [19]
+6) Quality & Safety Evaluation Suite: симуляции, тесты, LLM-eval, red-teaming наборы (prompt injection/PII leakage), регрессии. OpenAI Evals - пример фреймворка, который позиционируется именно для оценки LLM-моделей и систем и поддерживает кастомные eval-наборы под конкретный use-case. [20]
+7) Release Orchestrator: canary/shadow, автопромоут и автроллбек по SLO/error budget. Канареечные релизы и error budgets - классическая связка в SRE-подходе. [21]
+Data Plane (Run-time)
+1) Event Bus: входные события, internal events оркестратора, webhooks от внешних систем. Event streaming платформы описываются как инфраструктура для публикации/подписки, долговременного хранения и обработки потоков событий, включая использование в event-driven архитектурах. [4]
+2) Orchestration Engine (Durable): ядро, хранящее состояние каждого запуска сценария, обеспечивающее retries/timeouts/идемпотентность/компенсации. В качестве ориентиров можно рассматривать:
+- workflow-платформы с durable execution, где история событий обеспечивает восстановление после сбоев [1]
+- workflow-движки Camunda 8/Zeebe, где заявлены устойчивость, распределённая обработка и репликация без ручного вмешательства при отказах [22]
+3) Agent Runtime: tool calling + контекст-менеджер + память, встроенные guardrails и "confidence/fallback". Механика tool calling в API-подходе описывается как многошаговая связка модель - приложение - инструмент - модель. [16]
+4) Memory & Knowledge (RAG):
+- Short-term: контекст конкретного запуска/сессии
+- Long-term: профили/история/документы через retrieval-augmented generation, где генерация дополняется извлечением релевантных документов из внешней памяти/индекса; классическая формулировка RAG как сочетания параметрической и непараметрической памяти описана в работе Lewis et al. [23]
+5) Observability Pipeline: распределённые трассы, метрики, логи с корреляцией; OpenTelemetry позиционирует унификацию и корреляцию сигналов как ключевую ценность. [7]
+6) Audit & Compliance Log: неизменяемый журнал действий сценария/агента, привязанный к политикам и правам, пригодный для внешнего аудита.
+Пошаговый план создания
+Ниже - практичный план, ориентированный на реализацию с измеримыми инкрементами. Он построен так, чтобы вы как можно раньше получили "работающий контур" end-to-end (Spec > сборка > запуск > наблюдаемость), а затем наращивали шаблоны, политики и автономность.
+Этап инициализации: продуктовая рамка и "контракт автономности"
+Результат этапа: формализованные границы автономности и метрики.
+1) Сформировать "матрицу сценариев" (20-40 кандидатов): по ценности, рискам, частоте, сложности интеграций.
+2) Определить risk-классы и правила подтверждений: какие действия автономны, какие требуют approval/2-man rule, какие запрещены. Это следует из практик управления AI-рисками (governance по жизненному циклу). [2]
+3) Определить SLO/SLI и error-budget политику как основу автодеплоя и kill-switch. SLO - измеримая цель по SLI, error budget - механизм баланса инноваций и стабильности. [24]
+4) Определить минимальный комплаенс-контур данных (PII-классификация, retention, доступы) с учётом принципов GDPR. [12]
+5) Зафиксировать требования под EU AI Act по таймлайну применимости (особенно если ваши сценарии потенциально подпадают под high-risk). [14]
+Этап MVP: "скелет платформы", 1-2 шаблона, 3-5 tools
+Результат этапа: Spec > Builder > Orchestrator > Tool Gateway > Observability, один реальный сценарий в проде (пусть даже узкий).
+1) Scenario Spec v0.1: JSON Schema/Protobuf + валидатор.
+2) Tool Registry v0.1: 3-5 критичных интеграций (CRM, уведомления, профиль клиента, платеж/счёт). Для вызовов - строго через gateway, потому что tool calling в LLM-архитектуре предполагает исполнение на стороне приложения, а не "внутри модели". [16]
+3) Orchestrator: выбрать движок и запустить минимальный durable workflow. Важны свойства durable execution/восстановления по истории событий. [1]
+4) Event bus: базовые топики/схемы; для event streaming важно долговременное хранение, масштабирование, fault-tolerance и наличие гарантий обработки (в т. ч. exactly-once как заявляемая возможность платформы). [4]
+5) Observability: трасса "от события до последнего tool-call"; корреляция сигналов в стиле OpenTelemetry. [25]
+6) Guardrails v0.1: запрет опасных действий в risk-классе без approvals; базовая защита от prompt injection и insecure output handling как обязательные риски LLM-приложений. [10]
+Этап "продуктовой платформы": CI/CD сценариев, eval-контур, canary, автоrollback
+Результат этапа: сценарии реально можно "выпускать" как артефакты с гейтами качества и безопасности.
+1) Scenario Builder v1: template selection > компиляция графа > генерация тестов и policy-пакета.
+2) CI pipeline:
+- static checks Spec
+- симуляции и synthetic edge cases
+- LLM eval (в т. ч. на безопасность/отказы)
+- интеграционные тесты tool-контрактов
+Подход с eval-фреймворками документирован как практика повышения стабильности LLM-приложений; у OpenAI есть гайды и инструменты eval. [26]
+3) Деплой по progressive delivery: canary/shadow, автопромоут/rollback по SLO. Canary-подход и связь с error budget хорошо описаны в SRE-практиках. [21]
+Этап масштабирования: multi-tenant, marketplace tools/templates, комплаенс "для энтерпрайза"
+Результат этапа: десятки команд могут создавать сценарии параллельно, не ломая безопасность и работу продакшена.
+1) Multi-tenant модель: namespaces/тенанты, отдельные квоты, cost-guard, изоляция данных и секретов (Zero Trust/least privilege). [8]
+2) Политики как код: единый engine для CI и рантайма, enforcement на gateway/оркестраторе/ADM-интерфейсах; OPA позиционируется как унифицирующий policy engine, применимый к Kubernetes/CI/CD/API gateways. [19]
+3) "Market" инструментов и шаблонов: registry + версионирование + рейтинг надёжности (SLO/success rate/cost). Поддержка MCP-экосистемы и наличие реестра MCP-серверов показывает жизнеспособность модели "tool registry как продуктового слоя". [27]
+4) Enterprise-security: нормализованный аудит, отчётность, контроль доступа на уровне объектов (иначе API-риски типа BOLA неизбежны). [9]
+5) Полный комплаенс по EU AI Act таймлайну (особенно к 2 августа 2026), если вы планируете EU-рынок или клиентов из EU. [14]
+Как использовать Codex/Cursor на разработке без "самострела"
+Так как вы прямо называете Codex/Cursor как основу дев-производительности, важно встроить правила безопасной разработки:
+* Понимать, что Codex позиционируется как облачный software engineering agent, выполняющий задачи в изолированном sandbox-окружении и умеющий делать параллельные задачи. [28]
+* Для Cursor учитывать режимы хранения/использования данных: компания описывает Privacy Mode и "zero data retention" для провайдеров моделей при включении соответствующей настройки, при этом оговаривая, что часть данных может сохраняться для функций продукта. [29]
+Отдельно: интерфейсы "инструменты/команды" в agentic-среде должны восприниматься как поверхность для атак и ошибок (это перекликается и с MCP-предупреждением, что tools - это по сути произвольное исполнение кода). [30]
+Техническое задание
+Ниже - "сквозное ТЗ", которое можно отдавать аналитикам/архитекторам/разработке для декомпозиции и оценки. Оно написано как единый документ, но логически делится на PRD+SRS.
+Назначение и границы
+Цель системы: создать платформу, позволяющую без ручной сборки запускать новые автономные сценарии в продакшене на основе декларативной спецификации, с автоматическими гейтами качества, стоимости и безопасности.
+Вне рамок (на старте):
+полная замена корпоративного IAM, собственный LLM-провайдер/обучение моделей, "универсальный RPA по экрану" (computer use) во всех системах. (Это можно добавлять позже как отдельные продукты/интеграции.)
+Пользователи и роли
+1) Автор сценария (product/ops): формулирует intent, ограничения, KPI, risk-класс, выбирает разрешённые tools, запускает публикацию.
+2) Платформенная команда: поддерживает шаблоны, tooling-слой, политики, CI/CD, наблюдаемость.
+3) Безопасность/комплаенс: утверждает policy-пакеты, правила PII, аудит.
+4) Эксплуатация/SRE: следит за SLO/error budget, управляет деградацией и инцидентами. SLO и error budget трактуются как механизм управления надёжностью и скоростью изменений. [31]
+Функциональные требования
+Декларативная спецификация сценария
+Система должна поддерживать Scenario Spec как версионируемый контракт со следующими блоками (минимум):
+* Goal/Outcome: цели, KPI, бизнес-метрики
+* Triggers: события/расписание/webhooks (под event streaming подход) [4]
+* Allowed Actions: список tools + права/лимиты
+* Data Contract: источники, качество, PII-классы
+* Non-functional: SLA/latency/cost/token budget (в т. ч. "Unbounded Consumption" как риск для LLM-систем выделяется в списках угроз - поэтому budget обязателен) [32]
+* Risk Class: правила подтверждений, запреты, лимиты
+* Observability Spec: какие метрики/алерты/триггеры деградации
+Acceptance criteria: Spec проходит статическую валидацию и может быть скомпилирован в артефакты без ручного редактирования workflow-кода.
+Scenario Builder/Compiler
+Builder должен:
+1) Определять подходящий шаблон (pattern selection) из Template Library
+2) Компилировать Spec > workflow graph (state machine/DAG) с таймаутами/retries/ветвлениями
+3) Генерировать "политику исполнения" (guardrails), которую будет применять рантайм
+4) Генерировать набор тестов и eval-кейсов (smoke + edge cases)
+5) Генерировать deployment descriptor (как выкатывать: shadow/canary)
+Принцип: все артефакты воспроизводимы из Spec и версий шаблонов/tools/policies.
+Tool Registry + Tool Gateway
+Tool Registry хранит для каждого инструмента:
+* типизированные входы/выходы, SLA, rate limits
+* требования авторизации (scopes/roles)
+* риск-класс действия (безопасно/опасно/требует подтверждения)
+* правила идемпотентности и дедупликации (например, idempotency keys)
+Практика идемпотентных запросов критична для безопасных retries в финансах/созданиях сущностей; Stripe прямо описывает use of idempotency key для предотвращения двойного выполнения при повторе запросов. [33]
+Tool Gateway обязан:
+* применять политики доступа (least privilege, object-level checks) [34]
+* логировать вход/выход, коррелировать с trace/span
+* обеспечивать rate limiting и circuit breaking
+* поддерживать sandbox/stub режим для симуляций и shadow
+Run-time исполнение сценариев
+Run-time должен быть event-driven и содержать:
+* Event ingestion: подписка на топики/очереди, обработка webhooks
+* Orchestration engine: хранение durable state каждого запуска, восстановление после сбоев, retries/timeouts. Механизм хранения истории событий, служащий для восстановления и аудита, описан в документации Temporal как ключевой для durable execution. [35]
+* Saga/Compensation: для длинных транзакций обязательна поддержка компенсаций; saga-паттерн описывает это как последовательность локальных транзакций с компенсирующими действиями при сбое. [3]
+Agent Runtime
+Agent Runtime вызывается как шаги workflow и должен поддерживать:
+* Router: выбор роли/подагента
+* Tool calling: многошаговый цикл модель - tool - модель (исполнение на стороне приложения) [16]
+* Memory: short-term + RAG long-term. RAG как подход сочетания генерации и retrieval описан в классической работе Lewis et al. [23]
+* Guardrails: защита от prompt injection, insecure output handling, excessive agency и др. рисков LLM-приложений [10]
+* Cost/token management: budgets и правила обрезки контекста
+* Fallback: деградация на deterministic workflow при нарушении SLO/росте ошибок
+Observability и контроль
+Система должна:
+* строить end-to-end трассу по каждому запуску (trigger > шаги > tool calls > результат)
+* публиковать метрики SLI и проверять их относительно SLO (SLO как "цель по SLI" описан в SRE-материалах). [5]
+* поддерживать canary/shadow и автоrollback при нарушении error budget; canarying releases и связь с error budget описаны в SRE-workbook. [6]
+* использовать стандарты корреляции сигналов (OpenTelemetry traces/logs/metrics). [25]
+* иметь kill switch на уровне сценария/тенанта/всей платформы
+Нефункциональные требования
+(Часть значений - "по умолчанию", окончательные цифры - продуктовые решения и результат нагрузочного тестирования.)
+Надёжность и управляемость - Каждая операция должна быть или идемпотентной, или защищённой дедупликацией/идемпотентным ключом на уровне gateway/оркестратора. [36]
+- Должны быть определены SLO/SLI и error budget policy как обязательная часть релизного процесса. [31]
+Масштабирование - Оркестрация должна поддерживать большие объёмы параллельных процессов; Zeebe, например, акцентирует дизайн без центральной БД и распределение обработки/репликацию для throughput и отказоустойчивости. [22]
+- Event streaming слой должен масштабироваться горизонтально и обеспечивать fault tolerance; Kafka описывает распределённость, отказоустойчивость и долговременное хранение событий как базовые свойства платформы. [4]
+Безопасность - Реализовать Zero Trust и least privilege как базовый принцип (ограничение видимости и доступности; непрерывная проверка). [8]
+- Обязательный object-level authorization в API, учитывая распространённость BOLA как ключевого риска. [9]
+- LLM-угрозы: prompt injection и insecure output handling должны быть покрыты техническими контролями (контент-фильтры, policy enforcement, строгая валидация output перед действиями). [10]
+Данные и комплаенс - GDPR: поддержать принципы обработки данных и контроль прозрачности/целей/минимизации, как задано в тексте регламента. [12]
+- EU AI Act: учесть сроки применимости и требования к практикам управления и готовности; таймлайн применимости до 2 августа 2026 следует учитывать в roadmap и в "Definition of Done" для enterprise-версии. [14]
+Данные и модели
+Минимальные сущности (логическая модель):
+* ScenarioSpec (id, version, owner, risk_class, allowed_tools, triggers, policies, tests_ref)
+* ToolDefinition (id, version, schema_in/out, sla, scopes, idempotency_rules)
+* ScenarioArtifact (workflow_def, agent_plan, policy_pack, dashboard_def)
+* ScenarioRun (run_id, spec_version, start_event, current_state, trace_id, cost, outcome)
+* AuditEvent (who/what/when/why, tool_call, decision, policy_eval_result)
+* EvalSuite (dataset_ref, metrics, thresholds)
+API и интеграционные контракты
+Control Plane API: - CRUD Spec, publish/compile, list artifacts, manage templates, manage tools, manage policies, start canary, rollback.
+Run-time API: - ingest event/webhook, query run status, fetch trace, fetch audit.
+Event contracts: - topic naming conventions
+- schema registry strategy
+- correlation_id / causation_id / idempotency_key patterns
+Тестирование и релиз
+1) Unit/contract tests tool-интеграций
+2) Simulation (synthetic) и shadow traffic
+3) LLM eval: безопасность/качество/отказы. Evals как практика повышения стабильности описывается в руководствах и open-source фреймворке. [37]
+4) Canary и progressive delivery; canary-стратегии документированы в SRE-подходе и vendor-гайдах деплоя. [38]
+5) Auto rollback по SLO/error budget. [39]
+Критерии приёмки (MoSCoW в сжатом виде)
+Must have (MVP): Spec > compile > execute > observe; tool gateway; базовые guardrails; аудит; canary.
+Should have: eval-контур; template library; sagas/compensations; object-level authorization. [40]
+Could have: marketplace шаблонов/tools; multi-agent сложные роутинги; расширенный RAG. [41]
+Won't (пока): полностью автономные "опасные финансовые операции" без approvals; "неограниченные" инструменты. (Excessive agency прямо выделяется как риск.) [32]
+Инвесторский питч
+Проблема: "агенты обещают автономность, но продакшен требует управляемости"
+Рынок активно движется к агентам и оркестрации, но компании упираются в три барьера:
+1) непредсказуемость и риск LLM-поведения (prompt injection, insecure output, excessive agency) [10]
+2) отсутствие производственного контура качества (eval, canary, rollback по SLO/error budget) [42]
+3) комплаенс и требования регулирования (в EU - таймлайн применимости AI Act до 2 августа 2026, плюс GDPR-принципы по данным). [43]
+Решение: "конструктор" как platform layer между intent и продакшен-исполнением
+Ваш продукт - это платформа "intent > executable scenario", которая превращает автономность в управляемую инженерную дисциплину:
+* декларативный Spec как единый контракт
+* компиляция в durable workflow + agent plan
+* стандартизированный tool-слой с правами, SLA и аудитом
+* автоматические гейты: симуляции, eval, интеграционные тесты, canary/shadow
+* наблюдаемость и автоконтроль по SLO/error budget
+Это позиционируется не как "ещё один чатбот", а как операционная система автономных процессов (adaptive orchestration). Forrester выделяет направление adaptive process orchestration как комбинацию automation-технологий, включая AI agents, чтобы двигаться к автономным операциям. [44]
+Почему сейчас: рынок и катализаторы
+* McKinsey оценивал экономический потенциал generative AI как триллионы долларов ежегодной добавленной стоимости (порядка $2.6-$4.4T в год по их оценке по use cases). [45]
+* Deloitte[46] называет agent orchestration отдельным драйвером ценности и приводит агрегированные рыночные оценки по autonomous AI agent market (вплоть до десятков миллиардов к 2030). [47]
+* ?entity?["company","McKinsey & Company","management consulting firm"]? и другие исследователи одновременно подчёркивают, что компании усиливают меры по снижению риска неточности/ошибок при внедрении AI - это усиливает спрос на governance-платформы, а не просто "генерацию". [48]
+* Регуляторный таймлайн в EU объективно "подталкивает" рынок к системным решениям, а не экспериментам: полная применимость AI Act - 2 августа 2026, при этом часть обязанностей применялась раньше. [14]
+Конкурентное поле и дифференциация
+Кого инвесторы/клиенты будут сравнивать с вами: - workflow/BPM оркестрация (движки процессов)
+- iPaaS/интеграционные платформы
+- RPA
+- agent frameworks / "чатботы с tools"
+Чем вы отличаетесь:
+1) "Build-time фабрика" (Spec > compile > eval > canary) как core IP, тогда как многие решения фокусируются только на run-time. [49]
+2) единый tool-слой с политиками и аудитом; акцент на том, что tool calling должен быть контролируемым многошаговым процессом в приложении, а не "магией модели". [16]
+3) безопасность LLM-приложений как первая сущность (prompt injection, insecure output, excessive agency) на уровне платформы. [10]
+4) комплаенс-ready архитектура под EU-сроки. [50]
+Бизнес-модель и go-to-market
+Модель монетизации обычно хорошо складывается в 2-3 линии: - Enterprise subscription за платформу (по числу тенантов/запусков/оркестраций)
+- Usage-based за agent runtime (токены/запуски) + премиум за eval/наблюдаемость
+- Marketplace revenue share на tools/templates (если развивать registry-подход)
+В качестве продукта-ускорителя можно использовать существующую экосистему tool-registry (идеологически близкую к MCP registry), чтобы быстрее вырастить каталог интеграций. [51]
+Roadmap в формате "инвест-слайдов"
+Q1-Q2: MVP платформы (1-2 шаблона, 3-5 tools, наблюдаемость, canary, аудит). [52]
+Q3: CI с eval-контуром, рост до 10-15 сценариев, multi-tenant, policy engine. [53]
+Q4+: marketplace, расширение доменов (финтех/ритейл/телко), комплаенс-пакеты под EU AI Act timeline 2026. [14]
+Запрос инвестиций и "на что тратим"
+* 40-50%: платформа (оркестрация, tool gateway, policy engine, SRE/observability)
+* 25-35%: quality & eval (датасеты, red teaming, регрессии, автоматизация canary/rollback) [54]
+* 15-25%: интеграции и go-to-market (design partners, первые индустрии)
+Суть истории для инвестора: вы строите не "ассистента", а инфраструктуру управляемой автономности, которая превращает агентные обещания в контрактно-тестируемые, релиз-управляемые, комплаенс-готовые сценарии. [55]
+
+[1] What is Temporal? | Temporal Platform Documentation
+https://docs.temporal.io/temporal
+[2] AI Risk Management Framework
+https://www.nist.gov/itl/ai-risk-management-framework?utm_source=chatgpt.com
+[3] [40] Saga Design Pattern - Azure Architecture Center
+https://learn.microsoft.com/en-us/azure/architecture/patterns/saga?utm_source=chatgpt.com
+[4] Introduction | Apache Kafka
+https://kafka.apache.org/intro
+[5] [24] [31] [42] Defining slo: service level objective meaning
+https://sre.google/sre-book/service-level-objectives/?utm_source=chatgpt.com
+[6] [21] [38] [52] Canary Release: Deployment Safety and Efficiency
+https://sre.google/workbook/canarying-releases/?utm_source=chatgpt.com
+[7] OpenTelemetry Logging
+https://opentelemetry.io/docs/specs/otel/logs/?utm_source=chatgpt.com
+[8] [34] Zero Trust Architecture - NIST Technical Series Publications
+https://nvlpubs.nist.gov/nistpubs/specialpublications/NIST.SP.800-207.pdf?utm_source=chatgpt.com
+[9] API1:2023 Broken Object Level Authorization
+https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/?utm_source=chatgpt.com
+[10] [11] OWASP Top 10 for Large Language Model Applications
+https://owasp.org/www-project-top-10-for-large-language-model-applications/?utm_source=chatgpt.com
+[12] Consolidated TEXT: 32016R0679 - EN - 04.05.2016
+https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX%3A02016R0679-20160504&utm_source=chatgpt.com
+[13] [14] [15] [43] [50] AI Act | Shaping Europe's digital future - European Union
+https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai?utm_source=chatgpt.com
+[16] Function calling | OpenAI API
+https://developers.openai.com/api/docs/guides/function-calling/?utm_source=chatgpt.com
+[17] [18] [30] Specification
+https://modelcontextprotocol.io/specification/2025-11-25?utm_source=chatgpt.com
+[19] Open Policy Agent
+https://openpolicyagent.org/?utm_source=chatgpt.com
+[20] [54] openai/evals: Evals is a framework for evaluating LLMs ...
+https://github.com/openai/evals?utm_source=chatgpt.com
+[22] Introduction to Zeebe | Camunda 8 Docs
+https://docs.camunda.io/docs/components/zeebe/zeebe-overview/
+[23] [41] Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks
+https://arxiv.org/abs/2005.11401?utm_source=chatgpt.com
+[25] Overview
+https://opentelemetry.io/docs/specs/otel/overview/?utm_source=chatgpt.com
+[26] [37] [49] [53] Working with evals | OpenAI API
+https://developers.openai.com/api/docs/guides/evals/?utm_source=chatgpt.com
+[27] [51] Introducing the MCP Registry | Model Context Protocol Blog
+https://blog.modelcontextprotocol.io/posts/2025-09-08-mcp-registry-preview/?utm_source=chatgpt.com
+[28] Introducing Codex
+https://openai.com/index/introducing-codex/?utm_source=chatgpt.com
+[29] Data Use & Privacy Overview
+https://cursor.com/data-use?utm_source=chatgpt.com
+[32] OWASP Top 10 for LLM Applications 2025
+https://owasp.org/www-project-top-10-for-large-language-model-applications/assets/PDF/OWASP-Top-10-for-LLMs-v2025.pdf?utm_source=chatgpt.com
+[33] [36] [46] Idempotent requests | Stripe API Reference
+https://docs.stripe.com/api/idempotent_requests?utm_source=chatgpt.com
+[35] Events and Event History | Temporal Platform Documentation
+https://docs.temporal.io/workflow-execution/event
+[39] Error Budget Policy for Service Reliability
+https://sre.google/workbook/error-budget-policy/?utm_source=chatgpt.com
+[44] [55] Announcing The Evaluation Of The Adaptive Process ...
+https://www.forrester.com/blogs/announcing-the-evaluation-of-the-adaptive-process-orchestration-market/?utm_source=chatgpt.com
+[45] Economic potential of generative AI
+https://www.mckinsey.com/capabilities/tech-and-ai/our-insights/the-economic-potential-of-generative-ai-the-next-productivity-frontier?utm_source=chatgpt.com
+[47] Unlocking exponential value with AI agent orchestration
+https://www.deloitte.com/us/en/insights/industry/technology/technology-media-and-telecom-predictions/2026/ai-agent-orchestration.html?utm_source=chatgpt.com
+[48] The state of AI in early 2024: Gen AI adoption ...
+https://www.mckinsey.com/capabilities/quantumblack/our-insights/the-state-of-ai-2024?utm_source=chatgpt.com

@@ -1,0 +1,379 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тестирование Agent Runtime</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+            width: 100%;
+        }
+        .btn:hover { background: #5568d3; }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+            border-left: 4px solid #1976d2;
+        }
+        .status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #2e7d32;
+        }
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #c62828;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            display: none;
+        }
+        .result h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+        .result-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+        }
+        .result-label {
+            font-weight: 600;
+            color: #666;
+            margin-right: 10px;
+        }
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 8px;
+            transition: background 0.3s;
+        }
+        .back-link:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        .back-link[style*="667eea"]:hover {
+            background: rgba(102, 126, 234, 1) !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <a href="/dashboard.html" class="back-link">← Назад к Dashboard</a>
+            <a href="/observability-dashboard.html" class="back-link" style="background: rgba(102, 126, 234, 0.8);">📊 Observability Dashboard →</a>
+        </div>
+        
+        <h1>🧪 Тестирование Agent Runtime</h1>
+        
+        <div class="card">
+            <div id="status" class="status"></div>
+            
+            <form id="testForm">
+                <div class="form-group">
+                    <label for="userIntent">Ваш запрос:</label>
+                    <textarea id="userIntent" name="userIntent" placeholder="Например: Find information about TypeScript programming language" required>Find information about TypeScript programming language</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="scenarioId">ID сценария:</label>
+                    <input type="text" id="scenarioId" name="scenarioId" value="test-scenario" required>
+                </div>
+                
+                <button type="submit" class="btn" id="submitBtn">
+                    🚀 Запустить Agent Runtime
+                </button>
+            </form>
+            
+            <div id="result" class="result">
+                <h3>Результаты выполнения:</h3>
+                <div id="resultContent"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const form = document.getElementById('testForm');
+        const statusDiv = document.getElementById('status');
+        const resultDiv = document.getElementById('result');
+        const resultContent = document.getElementById('resultContent');
+        const submitBtn = document.getElementById('submitBtn');
+        
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            statusDiv.style.display = 'block';
+        }
+        
+        function hideStatus() {
+            statusDiv.style.display = 'none';
+        }
+        
+        function showResult(data) {
+            resultContent.innerHTML = `
+                <div class="result-item">
+                    <span class="result-label">Успешно:</span>
+                    <strong>${data.success ? '✅ Да' : '❌ Нет'}</strong>
+                </div>
+                ${data.output ? `
+                <div class="result-item">
+                    <span class="result-label">Вывод:</span>
+                    <div style="margin-top: 5px; white-space: pre-wrap;">${data.output}</div>
+                </div>
+                ` : ''}
+                <div class="result-item">
+                    <span class="result-label">Tool calls выполнено:</span>
+                    <strong>${data.toolCallsExecuted || 0}</strong>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">Всего токенов:</span>
+                    <strong>${data.totalTokens || 0}</strong>
+                </div>
+                ${data.error ? `
+                <div class="result-item" style="background: #ffebee; color: #c62828;">
+                    <span class="result-label">Ошибка:</span>
+                    <strong>${data.error.code}</strong> - ${data.error.message}
+                </div>
+                ` : ''}
+                ${data.fallbackUsed ? `
+                <div class="result-item" style="background: #fff3e0; color: #e65100;">
+                    <span class="result-label">⚠️ Fallback:</span>
+                    Использован deterministic workflow
+                </div>
+                ` : ''}
+                <div class="result-item" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
+                    <a href="/observability-dashboard.html" style="display: inline-block; padding: 12px 24px; background: #667eea; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: background 0.3s; text-align: center;">
+                        📊 Перейти к Observability Dashboard
+                    </a>
+                </div>
+            `;
+            resultDiv.style.display = 'block';
+        }
+        
+        // Определяем базовый URL для API
+        function getApiBaseUrl() {
+            // Если страница открыта через file://, используем localhost
+            if (window.location.protocol === 'file:') {
+                return 'http://localhost:3000';
+            }
+            return ''; // Относительный путь если открыто через сервер
+        }
+        
+        // Проверка доступности сервера
+        async function checkServerAvailability() {
+            const apiUrl = getApiBaseUrl() + '/api/agent/status';
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000); // Таймаут 3 секунды
+                
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                return response.ok;
+            } catch (error) {
+                return false;
+            }
+        }
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            hideStatus();
+            resultDiv.style.display = 'none';
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner"></span>Выполняется...';
+            
+            const formData = {
+                userIntent: document.getElementById('userIntent').value,
+                scenarioId: document.getElementById('scenarioId').value
+            };
+            
+            try {
+                // Проверяем доступность сервера перед отправкой запроса
+                const serverAvailable = await checkServerAvailability();
+                if (!serverAvailable) {
+                    throw new Error('Сервер недоступен. Убедитесь, что сервер запущен (node server.cjs)');
+                }
+                
+                showStatus('Отправка запроса к Agent Runtime...', 'info');
+                
+                const apiUrl = getApiBaseUrl() + '/api/agent/execute';
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showStatus('✅ Агент выполнен успешно!', 'success');
+                } else {
+                    showStatus(`❌ Ошибка: ${data.error?.message || 'Неизвестная ошибка'}`, 'error');
+                }
+                
+                showResult(data);
+            } catch (error) {
+                let errorMessage = error.message;
+                
+                // Более информативные сообщения об ошибках
+                if (error.message === 'Failed to fetch' || error.message.includes('fetch')) {
+                    const baseUrl = getApiBaseUrl();
+                    if (window.location.protocol === 'file:') {
+                        errorMessage = 'Сервер не запущен или недоступен. Откройте страницу через сервер: http://localhost:3000/test-agent.html';
+                    } else {
+                        errorMessage = 'Не удалось подключиться к серверу. Убедитесь, что сервер запущен: node server.cjs';
+                    }
+                }
+                
+                showStatus(`❌ Ошибка: ${errorMessage}`, 'error');
+                console.error('Error details:', error);
+                
+                // Показываем дополнительную информацию в результате
+                showResult({
+                    success: false,
+                    error: {
+                        code: 'FETCH_ERROR',
+                        message: errorMessage
+                    },
+                    output: `Проверьте:\n1. Запущен ли сервер (node server.cjs)\n2. Правильный ли URL: ${getApiBaseUrl() + '/api/agent/execute'}\n3. Открыта ли страница через сервер (не file://)`
+                });
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '🚀 Запустить Agent Runtime';
+            }
+        });
+        
+        // Проверка доступности сервера при загрузке
+        window.addEventListener('load', async () => {
+            const apiUrl = getApiBaseUrl() + '/api/agent/status';
+            try {
+                const response = await fetch(apiUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.ollamaAvailable) {
+                        showStatus('✅ Ollama доступен, модель: ' + data.model, 'success');
+                    } else {
+                        showStatus('⚠️ Ollama недоступен. Убедитесь, что Ollama запущен.', 'error');
+                    }
+                } else {
+                    showStatus('⚠️ Сервер вернул ошибку. Убедитесь, что сервер запущен на порту 3000.', 'error');
+                }
+            } catch (error) {
+                let message = '';
+                if (error.message === 'Failed to fetch' || error.message.includes('fetch')) {
+                    if (window.location.protocol === 'file:') {
+                        message = '⚠️ Страница открыта напрямую (file://). Откройте через сервер: http://localhost:3000/test-agent.html';
+                    } else {
+                        message = '⚠️ Сервер не запущен или недоступен. Запустите сервер: node server.cjs';
+                    }
+                } else {
+                    message = window.location.protocol === 'file:' 
+                        ? '⚠️ Откройте страницу через сервер: http://localhost:3000/test-agent.html'
+                        : '⚠️ Не удалось подключиться к серверу. Запустите: node server.cjs';
+                }
+                showStatus(message, 'error');
+                console.error('Connection error:', error);
+            }
+        });
+    </script>
+</body>
+</html>

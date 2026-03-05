@@ -3,232 +3,130 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Конструктор сценариев - Dashboard</title>
+    <title>Scenario Builder - Dashboard</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             padding: 20px;
         }
-        .container { max-width: 1200px; margin: 0 auto; }
-        h1 {
-            color: white;
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 2.5em;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
-        }
-        .summary {
-            background: rgba(255,255,255,0.2);
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            color: white;
-            text-align: center;
-            font-size: 1.2em;
-        }
-        .dashboard {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .card {
+        .container {
             background: white;
-            border-radius: 12px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            transition: transform 0.3s ease;
-        }
-        .card:hover { transform: translateY(-5px); }
-        .card h2 {
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 1.5em;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 10px;
-        }
-        .status {
-            display: inline-block;
-            padding: 8px 15px;
             border-radius: 20px;
-            font-weight: bold;
-            font-size: 0.9em;
-            margin-top: 10px;
-        }
-        .status.ok { background: #10b981; color: white; }
-        .status.error { background: #ef4444; color: white; }
-        .status.ready { background: #3b82f6; color: white; }
-        .info { margin: 10px 0; color: #666; font-size: 0.9em; }
-        code {
-            background: #f3f4f6;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-        }
-        ul { list-style: none; margin-top: 15px; }
-        li {
-            padding: 8px;
-            margin: 5px 0;
-            background: #f3f4f6;
-            border-radius: 6px;
-        }
-        .refresh-btn {
-            display: block;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            max-width: 900px;
             width: 100%;
-            padding: 15px;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        .redirect-message {
+            background: #f0f4ff;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 30px 0;
+            border-radius: 8px;
+            text-align: left;
+        }
+        .redirect-message p {
+            margin-bottom: 10px;
+            color: #333;
+        }
+        .redirect-link {
+            display: inline-block;
             background: #667eea;
             color: white;
-            border: none;
+            padding: 12px 24px;
+            text-decoration: none;
             border-radius: 8px;
-            font-size: 1.1em;
-            font-weight: bold;
-            cursor: pointer;
-            margin-top: 20px;
-            transition: background 0.3s ease;
+            font-weight: 600;
+            margin-top: 10px;
+            transition: background 0.3s;
         }
-        .refresh-btn:hover { background: #5568d3; }
+        .redirect-link:hover {
+            background: #5568d3;
+        }
+        .links {
+            margin-top: 30px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .link-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 12px;
+            text-decoration: none;
+            color: #333;
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: 2px solid transparent;
+        }
+        .link-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            border-color: #667eea;
+        }
+        .link-card h3 {
+            margin-bottom: 8px;
+            font-size: 1.2em;
+        }
+        .link-card p {
+            color: #666;
+            font-size: 0.9em;
+        }
     </style>
+    <script>
+        // Автоматическое перенаправление через 3 секунды
+        setTimeout(() => {
+            window.location.href = '/admin-dashboard.html';
+        }, 3000);
+    </script>
 </head>
 <body>
     <div class="container">
-        <h1>🚀 Конструктор автономных сценариев</h1>
+        <h1>🚀 Scenario Builder</h1>
+        <p class="subtitle">Конструктор автономных сценариев и агентных процессов</p>
         
-        <div style="background: rgba(255,255,255,0.95); padding: 20px; border-radius: 12px; margin-bottom: 30px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-            <h2 style="color: #667eea; margin-bottom: 15px;">✨ Новый Admin Dashboard доступен!</h2>
-            <p style="color: #666; margin-bottom: 20px;">Профессиональный интерфейс для технических специалистов с улучшенной навигацией и диагностикой</p>
-            <a href="admin-dashboard.html" style="display: inline-block; padding: 15px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 1.1em; transition: background 0.3s;">
-                🚀 Перейти к Admin Dashboard →
-            </a>
+        <div class="redirect-message">
+            <p><strong>Перенаправление на Admin Dashboard...</strong></p>
+            <p>Вы будете автоматически перенаправлены через 3 секунды.</p>
+            <a href="/admin-dashboard.html" class="redirect-link">Перейти сейчас →</a>
         </div>
-        
-        <div class="summary">
-            <strong>Статус системы:</strong>
-            <span style="margin: 0 20px;">Всего компонентов: 5</span>
-            <span style="margin: 0 20px; color: #10b981;">✓ Работает: 5</span>
-            <span style="margin: 0 20px; color: #ef4444;">✗ Ошибки: 0</span>
-        </div>
-        
-        <div class="dashboard">
-            <div class="card">
-                <h2>Scenario Spec</h2>
-                <div class="info">Файл: <code>src/spec/scenario-spec.ts</code></div>
-                <span class="status ok">✓ Работает</span>
-                <div class="info" style="margin-top: 15px;">
-                    <strong>Функции:</strong><br>
-                    • Валидация спецификаций<br>
-                    • Zod схемы<br>
-                    • Поддержка всех блоков ТЗ
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>Scenario Builder</h2>
-                <div class="info">Файл: <code>src/builder/scenario-builder.ts</code></div>
-                <span class="status ok">✓ Работает</span>
-                <div class="info" style="margin-top: 15px;">
-                    <strong>Функции:</strong><br>
-                    • Компиляция Spec → Workflow Graph<br>
-                    • Генерация политик<br>
-                    • Deployment descriptors
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>Tool Registry</h2>
-                <div class="info">Файл: <code>src/registry/tool-registry.ts</code></div>
-                <span class="status ok">✓ Работает</span>
-                <div class="info" style="margin-top: 15px;">
-                    <strong>Функции:</strong><br>
-                    • Регистрация инструментов<br>
-                    • Хранение метаданных<br>
-                    • Поиск и фильтрация
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>Tool Gateway</h2>
-                <div class="info">Файл: <code>src/gateway/tool-gateway.ts</code></div>
-                <span class="status ok">✓ Работает</span>
-                <div class="info" style="margin-top: 15px;">
-                    <strong>Функции:</strong><br>
-                    • Контроль доступа<br>
-                    • Rate limiting<br>
-                    • Circuit breaking
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>Runtime Orchestrator</h2>
-                <div class="info">Файл: <code>src/runtime/orchestrator.ts</code></div>
-                <span class="status ok">✓ Работает</span>
-                <div class="info" style="margin-top: 15px;">
-                    <strong>Функции:</strong><br>
-                    • Event-driven исполнение<br>
-                    • Durable execution<br>
-                    • Saga pattern
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>Observability</h2>
-                <div class="info">Файл: <code>src/observability/</code></div>
-                <span class="status ok">✓ Работает</span>
-                <div class="info" style="margin-top: 15px;">
-                    <strong>Функции:</strong><br>
-                    • Трассировка выполнения (OpenTelemetry)<br>
-                    • Метрики производительности (Prometheus)<br>
-                    • Структурированное логирование
-                </div>
-                <a href="observability-dashboard.html" style="display: block; margin-top: 15px; padding: 10px; background: #667eea; color: white; text-decoration: none; border-radius: 6px; text-align: center; font-weight: bold; transition: background 0.3s;">
-                    📊 Открыть Observability Dashboard
-                </a>
-            </div>
-            
-            <div class="card">
-                <h2>Тесты</h2>
-                <div class="info">Готово к запуску: 4 из 4</div>
-                <ul>
-                    <li><span class="status ready">✓</span> <strong>scenario-spec</strong> - тесты валидации</li>
-                    <li><span class="status ready">✓</span> <strong>scenario-builder</strong> - тесты компилятора</li>
-                    <li><span class="status ready">✓</span> <strong>tool-registry</strong> - тесты реестра</li>
-                    <li><span class="status ready">✓</span> <strong>tool-gateway</strong> - тесты шлюза</li>
-                </ul>
-            </div>
-            
-            <div class="card">
-                <h2>📋 Инструкции</h2>
-                <div class="info">
-                    <p><strong>1. Установите зависимости:</strong></p>
-                    <code>npm install</code>
-                    <p style="margin-top: 15px;"><strong>2. Запустите тесты:</strong></p>
-                    <code>npm test</code>
-                    <p style="margin-top: 15px;"><strong>3. Запустите примеры:</strong></p>
-                    <code>npm run example</code>
-                    <p style="margin-top: 15px;"><strong>4. Запустите веб-сервер:</strong></p>
-                    <code>node server.js</code>
-                    <p style="margin-top: 15px;">Затем откройте: <code>http://localhost:3000</code></p>
-                </div>
-            </div>
-        </div>
-        
-        <button class="refresh-btn" onclick="location.reload()">🔄 Обновить страницу</button>
-        
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 20px;">
-            <a href="test-agent.html" style="display: block; text-align: center; padding: 15px; background: #10b981; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: background 0.3s;">
-                🧪 Тестирование Agent Runtime
+
+        <div class="links">
+            <a href="/admin-dashboard.html" class="link-card">
+                <h3>📊 Admin Dashboard</h3>
+                <p>Главная панель управления</p>
             </a>
-            <a href="test-orchestrator.html" style="display: block; text-align: center; padding: 15px; background: #f59e0b; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: background 0.3s;">
-                🔄 Тестирование Orchestrator
+            <a href="/test-agent.html" class="link-card">
+                <h3>🤖 Test Agent</h3>
+                <p>Тестирование Agent Runtime</p>
             </a>
-            <a href="test-event-bus.html" style="display: block; text-align: center; padding: 15px; background: #8b5cf6; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: background 0.3s;">
-                📡 Тестирование Event Bus
+            <a href="/test-orchestrator.html" class="link-card">
+                <h3>🔄 Test Orchestrator</h3>
+                <p>Тестирование Orchestrator</p>
             </a>
-            <a href="observability-dashboard.html" style="display: block; text-align: center; padding: 15px; background: #667eea; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: background 0.3s;">
-                📊 Observability Dashboard
+            <a href="/observability-dashboard.html" class="link-card">
+                <h3>📈 Observability</h3>
+                <p>Мониторинг и метрики</p>
             </a>
         </div>
     </div>

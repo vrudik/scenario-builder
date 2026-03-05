@@ -1,10 +1,10 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Testing - Admin Dashboard</title>
-    <link rel="stylesheet" href="admin-styles.css">
+    <link rel="stylesheet" href="/admin-styles.css">
     <style>
         .test-suite {
             margin-bottom: 30px;
@@ -65,23 +65,27 @@
                 <span>Scenario Builder Admin</span>
             </div>
             <div class="nav-links">
-                <a href="admin-dashboard.html" class="nav-link">
+                <a href="/admin-dashboard.html" class="nav-link">
                     <span>📊</span>
                     <span>Overview</span>
                 </a>
-                <a href="admin-components.html" class="nav-link">
+                <a href="/admin-components.html" class="nav-link">
                     <span>🧩</span>
                     <span>Components</span>
                 </a>
-                <a href="admin-testing.html" class="nav-link active">
+                <a href="/admin-testing.html" class="nav-link active">
                     <span>🧪</span>
                     <span>Testing</span>
                 </a>
-                <a href="admin-monitoring.html" class="nav-link">
+                <a href="/admin-monitoring.html" class="nav-link">
                     <span>📈</span>
                     <span>Monitoring</span>
                 </a>
-                <a href="admin-config.html" class="nav-link">
+                <a href="/admin-scenarios.html" class="nav-link">
+                    <span>📋</span>
+                    <span>Scenarios</span>
+                </a>
+                <a href="/admin-config.html" class="nav-link">
                     <span>⚙️</span>
                     <span>Configuration</span>
                 </a>
@@ -124,7 +128,7 @@
                         <div class="test-description">Проверка работы Agent Runtime с различными запросами</div>
                     </div>
                     <div class="test-actions">
-                        <a href="test-agent.html" class="action-btn">Открыть тест →</a>
+                        <a href="/test-agent.html" class="action-btn">Открыть тест →</a>
                     </div>
                 </div>
                 <div class="test-item">
@@ -133,7 +137,7 @@
                         <div class="test-description">Проверка выполнения workflow через Orchestrator</div>
                     </div>
                     <div class="test-actions">
-                        <a href="test-orchestrator.html" class="action-btn">Открыть тест →</a>
+                        <a href="/test-orchestrator.html" class="action-btn">Открыть тест →</a>
                     </div>
                 </div>
                 <div class="test-item">
@@ -142,7 +146,7 @@
                         <div class="test-description">Проверка публикации и подписки на события</div>
                     </div>
                     <div class="test-actions">
-                        <a href="test-event-bus.html" class="action-btn">Открыть тест →</a>
+                        <a href="/test-event-bus.html" class="action-btn">Открыть тест →</a>
                     </div>
                 </div>
                 <div class="test-item">
@@ -151,7 +155,7 @@
                         <div class="test-description">Проверка сбора метрик и трассировки</div>
                     </div>
                     <div class="test-actions">
-                        <a href="observability-dashboard.html" class="action-btn">Открыть →</a>
+                        <a href="/observability-dashboard.html" class="action-btn">Открыть →</a>
                     </div>
                 </div>
             </div>
@@ -232,7 +236,7 @@
         </div>
     </div>
 
-    <script src="admin-common.js"></script>
+    <script src="/admin-common.js"></script>
     <script>
         async function checkComponents() {
             const resultEl = document.getElementById('checkComponentsResult');

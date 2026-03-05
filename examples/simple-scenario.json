@@ -1,0 +1,71 @@
+{
+  "version": "0.1.0",
+  "id": "example-notification-scenario",
+  "name": "Пример сценария уведомлений",
+  "description": "Простой сценарий отправки уведомления клиенту",
+  "goal": "Отправить уведомление клиенту о важном событии",
+  "kpi": [
+    {
+      "name": "delivery_rate",
+      "target": 0.95,
+      "unit": "percentage"
+    }
+  ],
+  "triggers": [
+    {
+      "type": "event",
+      "source": "customer.events",
+      "config": {
+        "eventType": "important_update"
+      }
+    }
+  ],
+  "allowedActions": [
+    {
+      "id": "get-customer-profile",
+      "name": "Получить профиль клиента",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "send-notification",
+      "name": "Отправить уведомление",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false,
+      "rateLimit": 100
+    }
+  ],
+  "riskClass": "low",
+  "nonFunctional": {
+    "sla": {
+      "availability": 0.99,
+      "latency": {
+        "p95": 2000
+      }
+    },
+    "cost": {
+      "maxPerExecution": 0.01
+    },
+    "tokenBudget": {
+      "maxPerExecution": 1000
+    }
+  },
+  "observability": {
+    "metrics": [
+      "execution_time",
+      "success_rate",
+      "notification_delivery_rate"
+    ],
+    "alerts": [
+      {
+        "name": "high_failure_rate",
+        "condition": "success_rate < 0.9",
+        "severity": "error"
+      }
+    ]
+  },
+  "tags": ["notification", "customer", "example"],
+  "owner": "platform-team"
+}

@@ -1,0 +1,304 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Observability Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .metric-card {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .metric-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-unit {
+            font-size: 0.8em;
+            color: #999;
+            margin-left: 5px;
+        }
+        .links {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .link-card {
+            background: #667eea;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            text-align: center;
+            transition: transform 0.3s, background 0.3s;
+        }
+        .link-card:hover {
+            transform: translateY(-5px);
+            background: #5568d3;
+        }
+        .link-card h3 {
+            margin-bottom: 10px;
+        }
+        .status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .status.online { background: #10b981; color: white; }
+        .status.offline { background: #ef4444; color: white; }
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 15px;
+            transition: background 0.3s;
+        }
+        .refresh-btn:hover { background: #5568d3; }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 8px;
+            transition: background 0.3s;
+            font-weight: 500;
+        }
+        .back-link:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        .log-viewer {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-left: 3px solid transparent;
+        }
+        .log-entry.debug { border-left-color: #60a5fa; }
+        .log-entry.info { border-left-color: #10b981; }
+        .log-entry.warn { border-left-color: #f59e0b; }
+        .log-entry.error { border-left-color: #ef4444; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/dashboard.html" class="back-link">← Назад к Dashboard</a>
+        <h1>📊 Observability Dashboard</h1>
+        
+        <div class="card">
+            <h2>🔗 Ссылки на инструменты</h2>
+            <div class="links">
+                <a href="http://localhost:16686" target="_blank" class="link-card">
+                    <h3>Jaeger</h3>
+                    <p>Трассировки</p>
+                    <span id="jaeger-status" class="status offline">Проверка...</span>
+                </a>
+                <a href="http://localhost:9090" target="_blank" class="link-card">
+                    <h3>Prometheus</h3>
+                    <p>Метрики</p>
+                    <span id="prometheus-status" class="status offline">Проверка...</span>
+                </a>
+                <a href="http://localhost:9464/metrics" target="_blank" class="link-card">
+                    <h3>Prometheus Metrics</h3>
+                    <p>Экспорт метрик</p>
+                    <span id="metrics-status" class="status offline">Проверка...</span>
+                </a>
+                <a href="http://localhost:3000/test-agent.html" target="_blank" class="link-card">
+                    <h3>Test Agent</h3>
+                    <p>Тестирование</p>
+                </a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📈 Метрики системы</h2>
+            <button class="refresh-btn" onclick="loadMetrics()">🔄 Обновить метрики</button>
+            <div class="metric-grid" id="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">Выполнений сценариев</div>
+                    <div class="metric-value" id="scenario-executions">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Успешных выполнений</div>
+                    <div class="metric-value" id="scenario-success">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Неудачных выполнений</div>
+                    <div class="metric-value" id="scenario-failures">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Tool calls</div>
+                    <div class="metric-value" id="tool-calls">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Использовано токенов</div>
+                    <div class="metric-value" id="tokens-used">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Вызовов LLM</div>
+                    <div class="metric-value" id="llm-calls">-</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📝 Последние логи</h2>
+            <button class="refresh-btn" onclick="loadLogs()">🔄 Обновить логи</button>
+            <div class="log-viewer" id="log-viewer">
+                <div class="log-entry info">Загрузка логов...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Проверка доступности сервисов
+        async function checkService(url, statusId) {
+            try {
+                const response = await fetch(url, { method: 'HEAD', mode: 'no-cors' });
+                document.getElementById(statusId).textContent = 'Online';
+                document.getElementById(statusId).className = 'status online';
+            } catch (error) {
+                document.getElementById(statusId).textContent = 'Offline';
+                document.getElementById(statusId).className = 'status offline';
+            }
+        }
+
+        // Загрузка метрик
+        async function loadMetrics() {
+            try {
+                // Пробуем сначала локальный endpoint, потом прямой порт
+                let response;
+                try {
+                    response = await fetch('/api/metrics');
+                } catch (e) {
+                    response = await fetch('http://localhost:9464/metrics');
+                }
+                const text = await response.text();
+                
+                // Парсинг Prometheus формата
+                const metrics = {};
+                text.split('\n').forEach(line => {
+                    if (line.startsWith('#') || !line.trim()) return;
+                    // Поддержка формата: metric_name{labels} value или metric_name value
+                    const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{.*?\})?\s+([0-9.]+(?:[eE][+-]?[0-9]+)?)/);
+                    if (match) {
+                        const metricName = match[1];
+                        const value = parseFloat(match[2]);
+                        // Берем последнее значение для метрики (если есть несколько с разными labels)
+                        if (!metrics[metricName] || value > metrics[metricName]) {
+                            metrics[metricName] = value;
+                        }
+                    }
+                });
+
+                // Обновление UI
+                document.getElementById('scenario-executions').textContent = 
+                    Math.round(metrics.scenario_executions_total || 0);
+                document.getElementById('scenario-success').textContent = 
+                    Math.round(metrics.scenario_success_total || 0);
+                document.getElementById('scenario-failures').textContent = 
+                    Math.round(metrics.scenario_failures_total || 0);
+                document.getElementById('tool-calls').textContent = 
+                    Math.round(metrics.agent_tool_calls_total || 0);
+                document.getElementById('tokens-used').textContent = 
+                    Math.round(metrics.agent_tokens_used_total || 0);
+                document.getElementById('llm-calls').textContent = 
+                    Math.round(metrics.agent_llm_calls_total || 0);
+            } catch (error) {
+                console.error('Failed to load metrics:', error);
+                const errorMsg = error.message || 'Unknown error';
+                document.getElementById('metrics-grid').innerHTML = 
+                    '<div style="color: #ef4444; padding: 20px; background: #fee; border-radius: 8px;">' +
+                    '<strong>Не удалось загрузить метрики</strong><br>' +
+                    '<small>Ошибка: ' + errorMsg + '</small><br>' +
+                    '<small style="margin-top: 10px; display: block;">' +
+                    'Метрики будут доступны после выполнения первого запроса через test-agent.html</small>' +
+                    '</div>';
+            }
+        }
+
+        // Загрузка логов (симуляция - в реальности нужен API для логов)
+        function loadLogs() {
+            const logViewer = document.getElementById('log-viewer');
+            logViewer.innerHTML = `
+                <div class="log-entry info">[INFO] Observability dashboard загружен</div>
+                <div class="log-entry debug">[DEBUG] Проверка доступности сервисов...</div>
+                <div class="log-entry info">[INFO] Метрики обновлены</div>
+                <div class="log-entry warn">[WARN] Для просмотра реальных логов используйте консоль сервера</div>
+            `;
+        }
+
+        // Инициализация
+        window.addEventListener('load', () => {
+            checkService('http://localhost:16686', 'jaeger-status');
+            checkService('http://localhost:9090', 'prometheus-status');
+            checkService('http://localhost:9464/metrics', 'metrics-status');
+            loadMetrics();
+            loadLogs();
+            
+            // Автообновление каждые 10 секунд
+            setInterval(loadMetrics, 10000);
+        });
+    </script>
+</body>
+</html>

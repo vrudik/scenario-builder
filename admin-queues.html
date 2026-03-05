@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Queues Management - Admin Dashboard</title>
+    <link rel="stylesheet" href="/admin-styles.css">
+    <style>
+        .queues-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .queue-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .queue-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .queue-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 12px;
+        }
+        .queue-title {
+            font-size: 1.25em;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .queue-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 0.875em;
+            color: var(--text-secondary);
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+        .queue-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.875em;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.show {
+            display: flex;
+        }
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--border);
+        }
+        .modal-title {
+            font-size: 1.5em;
+            font-weight: 600;
+        }
+        .close {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+        }
+        .close:hover {
+            background: var(--bg-light);
+            color: var(--text-primary);
+        }
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.95em;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .badge-active {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .badge-paused {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .badge-stopped {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .section-description {
+            color: var(--text-secondary);
+            font-size: 0.9em;
+            margin-top: 4px;
+        }
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        .alert.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border-left: 4px solid var(--error);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+        .filters {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .filters select,
+        .filters input {
+            padding: 10px 12px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.95em;
+        }
+        .filters input {
+            flex: 1;
+            min-width: 200px;
+        }
+        .trigger-item {
+            background: var(--bg-light);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .trigger-info {
+            flex: 1;
+        }
+        .trigger-info h4 {
+            margin-bottom: 4px;
+            color: var(--text-primary);
+        }
+        .trigger-info .trigger-meta {
+            font-size: 0.875em;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <span>⚙️</span>
+                <span>Scenario Builder Admin</span>
+            </div>
+            <div class="nav-links">
+                <a href="/admin-dashboard.html" class="nav-link">
+                    <span>📊</span>
+                    <span>Overview</span>
+                </a>
+                <a href="/admin-components.html" class="nav-link">
+                    <span>🧩</span>
+                    <span>Components</span>
+                </a>
+                <a href="/admin-testing.html" class="nav-link">
+                    <span>🧪</span>
+                    <span>Testing</span>
+                </a>
+                <a href="/admin-monitoring.html" class="nav-link">
+                    <span>📈</span>
+                    <span>Monitoring</span>
+                </a>
+                <a href="/admin-scenarios.html" class="nav-link">
+                    <span>📋</span>
+                    <span>Scenarios</span>
+                </a>
+                <a href="/admin-queues.html" class="nav-link active">
+                    <span>🔄</span>
+                    <span>Queues</span>
+                </a>
+                <a href="/admin-config.html" class="nav-link">
+                    <span>⚙️</span>
+                    <span>Configuration</span>
+                </a>
+            </div>
+            <div class="nav-status">
+                <span class="status-indicator"></span>
+                <span id="systemStatus">System Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-container">
+        <div class="section-card">
+            <div class="queues-header">
+                <div>
+                    <h2 class="section-title">
+                        <span class="section-icon">🔄</span>
+                        Scenario Queues
+                    </h2>
+                    <p class="section-description">Управление очередями сценариев и триггерами событий</p>
+                </div>
+                <button class="action-btn" onclick="openCreateQueueModal()">
+                    <span>+</span>
+                    <span>Create Queue</span>
+                </button>
+            </div>
+
+            <div class="filters">
+                <select id="statusFilter" onchange="loadQueues()">
+                    <option value="">All Statuses</option>
+                    <option value="active">Active</option>
+                    <option value="paused">Paused</option>
+                    <option value="stopped">Stopped</option>
+                </select>
+                <input type="text" id="searchInput" placeholder="Search by name..." oninput="loadQueues()">
+            </div>
+
+            <div id="queuesList">
+                <div class="empty-state">
+                    <div>Loading queues...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Create/Edit Queue -->
+    <div id="queueModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalTitle">Create Queue</h2>
+                <button class="close" onclick="closeQueueModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="queueForm">
+                    <input type="hidden" id="queueId">
+                    
+                    <div class="form-group">
+                        <label for="queueName">Name *</label>
+                        <input type="text" id="queueName" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="queueDescription">Description</label>
+                        <textarea id="queueDescription" rows="3"></textarea>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="queuePriority">Priority</label>
+                            <input type="number" id="queuePriority" value="0" min="0">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="queueMaxConcurrency">Max Concurrency</label>
+                            <input type="number" id="queueMaxConcurrency" value="10" min="1">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="queueStatus">Status</label>
+                        <select id="queueStatus">
+                            <option value="active">Active</option>
+                            <option value="paused">Paused</option>
+                            <option value="stopped">Stopped</option>
+                        </select>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="button" class="action-btn secondary" onclick="closeQueueModal()">Cancel</button>
+                        <button type="submit" class="action-btn">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Manage Triggers -->
+    <div id="triggersModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Queue Triggers</h2>
+                <button class="close" onclick="closeTriggersModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="triggersList"></div>
+                <div style="margin-top: 20px;">
+                    <button class="action-btn" onclick="openAddTriggerModal()">+ Add Trigger</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Add Trigger -->
+    <div id="addTriggerModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Add Trigger</h2>
+                <button class="close" onclick="closeAddTriggerModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="triggerForm">
+                    <div class="form-group">
+                        <label for="triggerEventType">Event Type *</label>
+                        <input type="text" id="triggerEventType" placeholder="e.g., user.created" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="triggerTopic">Kafka Topic *</label>
+                        <input type="text" id="triggerTopic" placeholder="e.g., user-events" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="triggerFilter">Filter (JSON, optional)</label>
+                        <textarea id="triggerFilter" rows="4" placeholder='{"userId": "123"}'></textarea>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="button" class="action-btn secondary" onclick="closeAddTriggerModal()">Cancel</button>
+                        <button type="submit" class="action-btn">Add</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Add Job -->
+    <div id="addJobModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Add Job to Queue</h2>
+                <button class="close" onclick="closeAddJobModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="jobForm">
+                    <div class="form-group">
+                        <label for="jobScenarioId">Scenario *</label>
+                        <select id="jobScenarioId" required>
+                            <option value="">Select scenario...</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="jobPriority">Priority</label>
+                        <input type="number" id="jobPriority" value="0" min="0">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="jobInput">Input Data (JSON, optional)</label>
+                        <textarea id="jobInput" rows="6" placeholder='{"key": "value"}'></textarea>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="button" class="action-btn secondary" onclick="closeAddJobModal()">Cancel</button>
+                        <button type="submit" class="action-btn">Add</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="/admin-common.js"></script>
+    <script>
+        let currentQueueId = null;
+        let scenarios = [];
+
+        // Загрузка очередей
+        async function loadQueues() {
+            const statusFilter = document.getElementById('statusFilter').value;
+            const searchInput = document.getElementById('searchInput').value.toLowerCase();
+            
+            try {
+                const params = new URLSearchParams();
+                if (statusFilter) params.append('status', statusFilter);
+                
+                const response = await fetch(`/api/queues?${params}`);
+                const data = await response.json();
+                
+                if (!data.success) {
+                    throw new Error(data.error?.message || 'Error loading queues');
+                }
+                
+                let queues = data.queues || [];
+                
+                // Фильтрация по поиску
+                if (searchInput) {
+                    queues = queues.filter(q => 
+                        q.name.toLowerCase().includes(searchInput) ||
+                        (q.description && q.description.toLowerCase().includes(searchInput))
+                    );
+                }
+                
+                renderQueues(queues);
+            } catch (error) {
+                console.error('Error loading queues:', error);
+                document.getElementById('queuesList').innerHTML = 
+                    `<div class="empty-state"><div class="alert error">Error loading queues: ${escapeHtml(error.message)}</div></div>`;
+            }
+        }
+
+        // Отображение очередей
+        function renderQueues(queues) {
+            const container = document.getElementById('queuesList');
+            
+            if (queues.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div>No queues found</div></div>';
+                return;
+            }
+            
+            container.innerHTML = queues.map(queue => `
+                <div class="queue-card">
+                    <div class="queue-header">
+                        <div>
+                            <div class="queue-title">${escapeHtml(queue.name)}</div>
+                            ${queue.description ? `<p style="color: var(--text-secondary); font-size: 0.9em; margin-top: 4px;">${escapeHtml(queue.description)}</p>` : ''}
+                        </div>
+                        <span class="badge badge-${queue.status}">${getStatusLabel(queue.status)}</span>
+                    </div>
+                    <div class="queue-meta">
+                        <span><strong>Priority:</strong> ${queue.priority}</span>
+                        <span><strong>Max Concurrency:</strong> ${queue.maxConcurrency}</span>
+                        ${queue._count ? `<span><strong>Jobs in Queue:</strong> ${queue._count.jobs || 0}</span>` : ''}
+                        ${queue.triggers && queue.triggers.length > 0 ? `<span><strong>Triggers:</strong> ${queue.triggers.length}</span>` : ''}
+                    </div>
+                    <div class="queue-actions">
+                        <button class="action-btn btn-sm" onclick="viewQueue('${queue.id}')">View</button>
+                        <button class="action-btn btn-sm secondary" onclick="editQueue('${queue.id}')">Edit</button>
+                        <button class="action-btn btn-sm" onclick="manageTriggers('${queue.id}')">Triggers</button>
+                        <button class="action-btn btn-sm success" onclick="addJob('${queue.id}')">Add Job</button>
+                        <button class="action-btn btn-sm warning" onclick="deleteQueue('${queue.id}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getStatusLabel(status) {
+            const labels = {
+                active: 'Active',
+                paused: 'Paused',
+                stopped: 'Stopped'
+            };
+            return labels[status] || status;
+        }
+
+        // Модальное окно создания/редактирования очереди
+        function openCreateQueueModal() {
+            document.getElementById('queueId').value = '';
+            document.getElementById('queueForm').reset();
+            document.getElementById('queueStatus').value = 'active';
+            document.getElementById('modalTitle').textContent = 'Create Queue';
+            document.getElementById('queueModal').classList.add('show');
+        }
+
+        function editQueue(id) {
+            fetch(`/api/queues/${id}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) throw new Error(data.error?.message || 'Error loading queue');
+                    
+                    const queue = data.queue;
+                    document.getElementById('queueId').value = queue.id;
+                    document.getElementById('queueName').value = queue.name;
+                    document.getElementById('queueDescription').value = queue.description || '';
+                    document.getElementById('queuePriority').value = queue.priority;
+                    document.getElementById('queueMaxConcurrency').value = queue.maxConcurrency;
+                    document.getElementById('queueStatus').value = queue.status;
+                    document.getElementById('modalTitle').textContent = 'Edit Queue';
+                    document.getElementById('queueModal').classList.add('show');
+                })
+                .catch(error => {
+                    alert('Error loading queue: ' + error.message);
+                });
+        }
+
+        function closeQueueModal() {
+            document.getElementById('queueModal').classList.remove('show');
+        }
+
+        document.getElementById('queueForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const queueId = document.getElementById('queueId').value;
+            const data = {
+                name: document.getElementById('queueName').value,
+                description: document.getElementById('queueDescription').value,
+                priority: parseInt(document.getElementById('queuePriority').value),
+                maxConcurrency: parseInt(document.getElementById('queueMaxConcurrency').value),
+                status: document.getElementById('queueStatus').value,
+            };
+            
+            try {
+                const url = queueId ? `/api/queues/${queueId}` : '/api/queues';
+                const method = queueId ? 'PUT' : 'POST';
+                
+                const response = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'Error saving queue');
+                }
+                
+                closeQueueModal();
+                loadQueues();
+            } catch (error) {
+                alert('Error saving queue: ' + error.message);
+            }
+        });
+
+        // Удаление очереди
+        async function deleteQueue(id) {
+            if (!confirm('Are you sure you want to delete this queue?')) return;
+            
+            try {
+                const response = await fetch(`/api/queues/${id}`, { method: 'DELETE' });
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'Error deleting queue');
+                }
+                
+                loadQueues();
+            } catch (error) {
+                alert('Error deleting queue: ' + error.message);
+            }
+        }
+
+        // Управление триггерами
+        async function manageTriggers(queueId) {
+            currentQueueId = queueId;
+            
+            try {
+                const response = await fetch(`/api/queues/${queueId}`);
+                const data = await response.json();
+                
+                if (!data.success) throw new Error(data.error?.message || 'Error loading queue');
+                
+                const triggers = data.queue.triggers || [];
+                renderTriggers(triggers);
+                document.getElementById('triggersModal').classList.add('show');
+            } catch (error) {
+                alert('Error loading triggers: ' + error.message);
+            }
+        }
+
+        function renderTriggers(triggers) {
+            const container = document.getElementById('triggersList');
+            
+            if (triggers.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div>No triggers configured</div></div>';
+                return;
+            }
+            
+            container.innerHTML = triggers.map(trigger => `
+                <div class="trigger-item">
+                    <div class="trigger-info">
+                        <h4>${escapeHtml(trigger.eventType)}</h4>
+                        <div class="trigger-meta">
+                            <span><strong>Topic:</strong> ${escapeHtml(trigger.topic)}</span>
+                            ${trigger.filter ? `<span style="margin-left: 16px;"><strong>Filter:</strong> ${escapeHtml(JSON.stringify(trigger.filter))}</span>` : ''}
+                        </div>
+                    </div>
+                    <div>
+                        <span class="badge badge-${trigger.enabled ? 'active' : 'paused'}" style="margin-right: 8px;">
+                            ${trigger.enabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                        <button class="action-btn btn-sm warning" onclick="deleteTrigger('${trigger.id}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function closeTriggersModal() {
+            document.getElementById('triggersModal').classList.remove('show');
+            currentQueueId = null;
+        }
+
+        function openAddTriggerModal() {
+            document.getElementById('triggerForm').reset();
+            document.getElementById('addTriggerModal').classList.add('show');
+        }
+
+        function closeAddTriggerModal() {
+            document.getElementById('addTriggerModal').classList.remove('show');
+        }
+
+        document.getElementById('triggerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const filterText = document.getElementById('triggerFilter').value.trim();
+            let filter = null;
+            if (filterText) {
+                try {
+                    filter = JSON.parse(filterText);
+                } catch (error) {
+                    alert('Invalid JSON format in filter');
+                    return;
+                }
+            }
+            
+            const data = {
+                eventType: document.getElementById('triggerEventType').value,
+                topic: document.getElementById('triggerTopic').value,
+                filter,
+            };
+            
+            try {
+                const response = await fetch(`/api/queues/${currentQueueId}/triggers`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'Error adding trigger');
+                }
+                
+                closeAddTriggerModal();
+                manageTriggers(currentQueueId);
+            } catch (error) {
+                alert('Error adding trigger: ' + error.message);
+            }
+        });
+
+        async function deleteTrigger(triggerId) {
+            if (!confirm('Are you sure you want to delete this trigger?')) return;
+            
+            try {
+                const response = await fetch(`/api/queues/${currentQueueId}/triggers/${triggerId}`, {
+                    method: 'DELETE',
+                });
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'Error deleting trigger');
+                }
+                
+                manageTriggers(currentQueueId);
+            } catch (error) {
+                alert('Error deleting trigger: ' + error.message);
+            }
+        }
+
+        // Добавление задания
+        async function addJob(queueId) {
+            currentQueueId = queueId;
+            
+            // Загружаем список сценариев
+            try {
+                const response = await fetch('/api/scenarios');
+                const data = await response.json();
+                
+                if (!data.success) throw new Error(data.error?.message || 'Error loading scenarios');
+                
+                scenarios = data.scenarios || [];
+                const select = document.getElementById('jobScenarioId');
+                select.innerHTML = '<option value="">Select scenario...</option>' +
+                    scenarios.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+                
+                document.getElementById('jobForm').reset();
+                document.getElementById('addJobModal').classList.add('show');
+            } catch (error) {
+                alert('Error loading scenarios: ' + error.message);
+            }
+        }
+
+        function closeAddJobModal() {
+            document.getElementById('addJobModal').classList.remove('show');
+            currentQueueId = null;
+        }
+
+        document.getElementById('jobForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const inputText = document.getElementById('jobInput').value.trim();
+            let input = null;
+            if (inputText) {
+                try {
+                    input = JSON.parse(inputText);
+                } catch (error) {
+                    alert('Invalid JSON format in input data');
+                    return;
+                }
+            }
+            
+            const data = {
+                scenarioId: document.getElementById('jobScenarioId').value,
+                priority: parseInt(document.getElementById('jobPriority').value),
+                input,
+            };
+            
+            try {
+                const response = await fetch(`/api/queues/${currentQueueId}/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'Error adding job');
+                }
+                
+                closeAddJobModal();
+                loadQueues();
+                alert('Job successfully added to queue');
+            } catch (error) {
+                alert('Error adding job: ' + error.message);
+            }
+        });
+
+        function viewQueue(id) {
+            // TODO: Реализовать просмотр деталей очереди
+            alert('Queue details view (coming soon)');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Закрытие модальных окон при клике вне их
+        window.onclick = function(event) {
+            const modals = ['queueModal', 'triggersModal', 'addTriggerModal', 'addJobModal'];
+            modals.forEach(modalId => {
+                const modal = document.getElementById(modalId);
+                if (event.target === modal) {
+                    modal.classList.remove('show');
+                }
+            });
+        };
+
+        // Загрузка при старте
+        loadQueues();
+    </script>
+</body>
+</html>

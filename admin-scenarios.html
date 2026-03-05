@@ -1,0 +1,507 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scenarios Management - Admin Dashboard</title>
+    <link rel="stylesheet" href="/admin-styles.css">
+    <style>
+        .scenarios-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .scenario-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .scenario-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .scenario-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 12px;
+        }
+        .scenario-title {
+            font-size: 1.25em;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .scenario-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 0.875em;
+            color: var(--text-secondary);
+            margin-top: 8px;
+        }
+        .scenario-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 0.875em;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.show {
+            display: flex;
+        }
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--border);
+        }
+        .modal-title {
+            font-size: 1.5em;
+            font-weight: 600;
+        }
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+        }
+        .close-btn:hover {
+            background: var(--bg-light);
+            color: var(--text-primary);
+        }
+        .form-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+        .json-editor {
+            font-family: 'Courier New', monospace;
+            font-size: 0.875em;
+            width: 100%;
+            min-height: 300px;
+            padding: 12px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            resize: vertical;
+        }
+        .json-editor:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 16px;
+            opacity: 0.5;
+        }
+        .executions-list {
+            margin-top: 16px;
+        }
+        .execution-item {
+            padding: 12px;
+            background: var(--bg-light);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <span>⚙️</span>
+                <span>Scenario Builder Admin</span>
+            </div>
+            <div class="nav-links">
+                <a href="/admin-dashboard.html" class="nav-link">
+                    <span>📊</span>
+                    <span>Overview</span>
+                </a>
+                <a href="/admin-components.html" class="nav-link">
+                    <span>🧩</span>
+                    <span>Components</span>
+                </a>
+                <a href="/admin-testing.html" class="nav-link">
+                    <span>🧪</span>
+                    <span>Testing</span>
+                </a>
+                <a href="/admin-monitoring.html" class="nav-link">
+                    <span>📈</span>
+                    <span>Monitoring</span>
+                </a>
+                <a href="/admin-scenarios.html" class="nav-link active">
+                    <span>📋</span>
+                    <span>Scenarios</span>
+                </a>
+                <a href="/admin-config.html" class="nav-link">
+                    <span>⚙️</span>
+                    <span>Configuration</span>
+                </a>
+            </div>
+            <div class="nav-status">
+                <span class="status-indicator"></span>
+                <span id="systemStatus">System Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <div class="page-header">
+            <h1 class="page-title">Scenarios Management</h1>
+            <p class="page-subtitle">Управление сценариями и просмотр выполнений</p>
+        </div>
+
+        <div class="scenarios-header">
+            <div>
+                <label for="statusFilter" style="margin-right: 8px;">Filter:</label>
+                <select id="statusFilter" class="config-input" style="width: auto; display: inline-block;">
+                    <option value="">All</option>
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="archived">Archived</option>
+                </select>
+            </div>
+            <button class="action-btn" onclick="openCreateModal()">
+                <span>➕</span>
+                <span>Create Scenario</span>
+            </button>
+        </div>
+
+        <div id="scenariosList">
+            <div class="empty-state">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <p>Загрузка сценариев...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal для создания/редактирования сценария -->
+    <div id="scenarioModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalTitle">Create Scenario</h2>
+                <button class="close-btn" onclick="closeModal()">×</button>
+            </div>
+            <form id="scenarioForm" onsubmit="saveScenario(event)">
+                <input type="hidden" id="scenarioId">
+                <div class="config-item">
+                    <label class="config-label">Name *</label>
+                    <input type="text" class="config-input" id="scenarioName" required>
+                </div>
+                <div class="config-item">
+                    <label class="config-label">Description</label>
+                    <textarea class="config-input" id="scenarioDescription" rows="3"></textarea>
+                </div>
+                <div class="config-item">
+                    <label class="config-label">Status</label>
+                    <select class="config-input" id="scenarioStatus">
+                        <option value="draft">Draft</option>
+                        <option value="active">Active</option>
+                        <option value="archived">Archived</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label class="config-label">Scenario Spec (JSON) *</label>
+                    <div class="config-description">Введите валидный JSON с ScenarioSpec</div>
+                    <textarea class="json-editor" id="scenarioSpec" required></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="action-btn secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="action-btn">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/admin-common.js"></script>
+    <script>
+        let scenarios = [];
+        let currentEditingId = null;
+
+        // Загрузка сценариев
+        async function loadScenarios() {
+            try {
+                const status = document.getElementById('statusFilter').value;
+                const url = `/api/scenarios${status ? `?status=${status}` : ''}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.success) {
+                    scenarios = data.scenarios || [];
+                    renderScenarios();
+                } else {
+                    showError('Failed to load scenarios: ' + (data.error?.message || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error loading scenarios:', error);
+                showError('Error loading scenarios: ' + error.message);
+            }
+        }
+
+        // Отображение сценариев
+        function renderScenarios() {
+            const container = document.getElementById('scenariosList');
+            
+            if (scenarios.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <p>No scenarios found</p>
+                        <p class="hint">Create your first scenario to get started</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = scenarios.map(scenario => `
+                <div class="scenario-card">
+                    <div class="scenario-header">
+                        <div>
+                            <div class="scenario-title">${escapeHtml(scenario.name)}</div>
+                            ${scenario.description ? `<div class="config-description">${escapeHtml(scenario.description)}</div>` : ''}
+                            <div class="scenario-meta">
+                                <span>ID: <code>${scenario.id}</code></span>
+                                <span>Version: ${scenario.version}</span>
+                                <span>Status: <span class="status-badge ${scenario.status === 'active' ? 'success' : scenario.status === 'archived' ? 'warning' : 'info'}">${scenario.status}</span></span>
+                                <span>Created: ${new Date(scenario.createdAt).toLocaleDateString()}</span>
+                            </div>
+                        </div>
+                        <div class="scenario-actions">
+                            <button class="action-btn btn-small" onclick="viewExecutions('${scenario.id}')">
+                                <span>📊</span>
+                                <span>Executions</span>
+                            </button>
+                            <button class="action-btn btn-small secondary" onclick="editScenario('${scenario.id}')">
+                                <span>✏️</span>
+                                <span>Edit</span>
+                            </button>
+                            <button class="action-btn btn-small warning" onclick="deleteScenario('${scenario.id}')">
+                                <span>🗑️</span>
+                                <span>Delete</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Открытие модального окна создания
+        function openCreateModal() {
+            currentEditingId = null;
+            document.getElementById('modalTitle').textContent = 'Create Scenario';
+            document.getElementById('scenarioId').value = '';
+            document.getElementById('scenarioName').value = '';
+            document.getElementById('scenarioDescription').value = '';
+            document.getElementById('scenarioStatus').value = 'draft';
+            document.getElementById('scenarioSpec').value = JSON.stringify({
+                version: '0.1.0',
+                id: '',
+                name: '',
+                goal: '',
+                triggers: [{ type: 'manual' }],
+                allowedActions: []
+            }, null, 2);
+            document.getElementById('scenarioModal').classList.add('show');
+        }
+
+        // Редактирование сценария
+        async function editScenario(id) {
+            const scenario = scenarios.find(s => s.id === id);
+            if (!scenario) return;
+
+            currentEditingId = id;
+            document.getElementById('modalTitle').textContent = 'Edit Scenario';
+            document.getElementById('scenarioId').value = scenario.id;
+            document.getElementById('scenarioName').value = scenario.name;
+            document.getElementById('scenarioDescription').value = scenario.description || '';
+            document.getElementById('scenarioStatus').value = scenario.status;
+            document.getElementById('scenarioSpec').value = JSON.stringify(scenario.spec, null, 2);
+            document.getElementById('scenarioModal').classList.add('show');
+        }
+
+        // Закрытие модального окна
+        function closeModal() {
+            document.getElementById('scenarioModal').classList.remove('show');
+            currentEditingId = null;
+        }
+
+        // Сохранение сценария
+        async function saveScenario(event) {
+            event.preventDefault();
+            
+            const name = document.getElementById('scenarioName').value;
+            const description = document.getElementById('scenarioDescription').value;
+            const status = document.getElementById('scenarioStatus').value;
+            let spec;
+            
+            try {
+                spec = JSON.parse(document.getElementById('scenarioSpec').value);
+            } catch (error) {
+                alert('Invalid JSON in Scenario Spec: ' + error.message);
+                return;
+            }
+
+            try {
+                const id = document.getElementById('scenarioId').value;
+                const url = id ? `/api/scenarios/${id}` : '/api/scenarios';
+                const method = id ? 'PUT' : 'POST';
+                
+                const response = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, description, spec, status })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    closeModal();
+                    loadScenarios();
+                } else {
+                    alert('Error: ' + (data.error?.message || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error saving scenario: ' + error.message);
+            }
+        }
+
+        // Удаление сценария
+        async function deleteScenario(id) {
+            if (!confirm('Are you sure you want to delete this scenario?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/scenarios/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    loadScenarios();
+                } else {
+                    alert('Error: ' + (data.error?.message || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error deleting scenario: ' + error.message);
+            }
+        }
+
+        // Просмотр выполнений сценария
+        async function viewExecutions(scenarioId) {
+            try {
+                const response = await fetch(`/api/scenarios/${scenarioId}/executions`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const executions = data.executions || [];
+                    const executionsHtml = executions.length > 0
+                        ? executions.map(exec => `
+                            <div class="execution-item">
+                                <div>
+                                    <strong>${exec.executionId}</strong>
+                                    <span class="status-badge ${exec.status === 'completed' ? 'success' : exec.status === 'failed' ? 'error' : 'info'}" style="margin-left: 12px;">
+                                        ${exec.status}
+                                    </span>
+                                    <div style="font-size: 0.875em; color: var(--text-secondary); margin-top: 4px;">
+                                        Started: ${new Date(exec.startedAt).toLocaleString()}
+                                        ${exec.completedAt ? ` | Completed: ${new Date(exec.completedAt).toLocaleString()}` : ''}
+                                    </div>
+                                </div>
+                                <a href="/admin-monitoring.html?execution=${exec.executionId}" class="action-btn btn-small">
+                                    View Details →
+                                </a>
+                            </div>
+                        `).join('')
+                        : '<div class="empty-state"><p>No executions found</p></div>';
+                    
+                    alert(`Executions for scenario:\n\n${executionsHtml.replace(/<[^>]*>/g, '')}`);
+                } else {
+                    alert('Error: ' + (data.error?.message || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error loading executions: ' + error.message);
+            }
+        }
+
+        // Утилиты
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showError(message) {
+            const container = document.getElementById('scenariosList');
+            container.innerHTML = `
+                <div class="alert error">
+                    <strong>Error:</strong> ${escapeHtml(message)}
+                </div>
+            `;
+        }
+
+        // Инициализация
+        window.addEventListener('load', () => {
+            loadScenarios();
+            document.getElementById('statusFilter').addEventListener('change', loadScenarios);
+        });
+
+        // Закрытие модального окна по клику вне его
+        document.getElementById('scenarioModal').addEventListener('click', (e) => {
+            if (e.target.id === 'scenarioModal') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>

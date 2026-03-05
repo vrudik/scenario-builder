@@ -1,10 +1,10 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monitoring - Admin Dashboard</title>
-    <link rel="stylesheet" href="admin-styles.css">
+    <link rel="stylesheet" href="/admin-styles.css">
     <style>
         .metrics-grid {
             display: grid;
@@ -61,23 +61,27 @@
                 <span>Scenario Builder Admin</span>
             </div>
             <div class="nav-links">
-                <a href="admin-dashboard.html" class="nav-link">
+                <a href="/admin-dashboard.html" class="nav-link">
                     <span>📊</span>
                     <span>Overview</span>
                 </a>
-                <a href="admin-components.html" class="nav-link">
+                <a href="/admin-components.html" class="nav-link">
                     <span>🧩</span>
                     <span>Components</span>
                 </a>
-                <a href="admin-testing.html" class="nav-link">
+                <a href="/admin-testing.html" class="nav-link">
                     <span>🧪</span>
                     <span>Testing</span>
                 </a>
-                <a href="admin-monitoring.html" class="nav-link active">
+                <a href="/admin-monitoring.html" class="nav-link active">
                     <span>📈</span>
                     <span>Monitoring</span>
                 </a>
-                <a href="admin-config.html" class="nav-link">
+                <a href="/admin-scenarios.html" class="nav-link">
+                    <span>📋</span>
+                    <span>Scenarios</span>
+                </a>
+                <a href="/admin-config.html" class="nav-link">
                     <span>⚙️</span>
                     <span>Configuration</span>
                 </a>
@@ -97,11 +101,11 @@
 
         <!-- Quick Links -->
         <div class="action-grid" style="margin-bottom: 30px;">
-            <a href="observability-dashboard.html" class="action-btn">
+            <a href="/observability-dashboard.html" class="action-btn">
                 <span>📊</span>
                 <span>Open Observability Dashboard</span>
             </a>
-            <a href="test-event-bus.html" class="action-btn secondary">
+            <a href="/test-event-bus.html" class="action-btn secondary">
                 <span>📡</span>
                 <span>Event Bus Monitor</span>
             </a>
@@ -166,7 +170,7 @@
         </div>
     </div>
 
-    <script src="admin-common.js"></script>
+    <script src="/admin-common.js"></script>
     <script>
         async function loadMetrics() {
             try {

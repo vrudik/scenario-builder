@@ -1,0 +1,722 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Bus Test - Scenario Builder</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-top: 15px;
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 6px;
+            transition: background 0.3s;
+        }
+
+        .back-link:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            align-items: center;
+        }
+
+        .status-item {
+            flex: 1;
+        }
+
+        .status-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .status-value {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+
+        .status-connected {
+            color: #10b981;
+        }
+
+        .status-disconnected {
+            color: #ef4444;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .control-group h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #6b7280;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+        }
+
+        .events-container {
+            margin-top: 30px;
+        }
+
+        .events-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .events-header h2 {
+            color: #333;
+        }
+
+        .clear-btn {
+            padding: 8px 16px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .events-list {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #f9fafb;
+        }
+
+        .event-item {
+            padding: 15px;
+            border-bottom: 1px solid #e5e7eb;
+            transition: background 0.2s;
+        }
+
+        .event-item:hover {
+            background: white;
+        }
+
+        .event-item:last-child {
+            border-bottom: none;
+        }
+
+        .event-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .event-type {
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .event-time {
+            font-size: 0.85em;
+            color: #6b7280;
+        }
+
+        .event-details {
+            font-size: 0.9em;
+            color: #555;
+            margin-top: 8px;
+        }
+
+        .event-payload {
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            overflow-x: auto;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: 600;
+        }
+
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .badge-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #6b7280;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📡 Event Bus Test</h1>
+            <p>Тестирование Kafka Event Bus для event-driven архитектуры</p>
+            <a href="/dashboard.html" class="back-link">← Назад к Dashboard</a>
+        </div>
+
+        <div class="content">
+            <div class="status-bar">
+                <div class="status-item">
+                    <div class="status-label">Kafka Status</div>
+                    <div class="status-value" id="kafkaStatus">Checking...</div>
+                    <div style="font-size: 0.8em; color: #666; margin-top: 5px;" id="kafkaHint">
+                        💡 Запустите: <code>docker-compose up -d</code>
+                    </div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Event Bus Status</div>
+                    <div class="status-value" id="eventBusStatus">Not Connected</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Events Received</div>
+                    <div class="status-value" id="eventsCount">0</div>
+                </div>
+            </div>
+            
+            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin-bottom: 20px; border-radius: 6px;">
+                <strong>ℹ️ Информация:</strong>
+                <p style="margin-top: 8px; margin-bottom: 0;">
+                    Kafka не запущен. Система работает в режиме <strong>graceful degradation</strong> - события сохраняются локально, но не публикуются в Kafka.
+                </p>
+                <p style="margin-top: 8px; margin-bottom: 0;">
+                    <strong>Для запуска Kafka:</strong><br>
+                    1. Запустите Docker Desktop<br>
+                    2. Выполните: <code>docker-compose up -d</code><br>
+                    3. Подождите несколько секунд и обновите страницу
+                </p>
+            </div>
+
+            <div class="controls">
+                <div class="control-group">
+                    <h3>🔌 Connection</h3>
+                    <div class="form-group">
+                        <label>Kafka Brokers</label>
+                        <input type="text" id="kafkaBrokers" value="localhost:9092" placeholder="localhost:9092">
+                    </div>
+                    <button class="btn" id="connectBtn" onclick="connectEventBus()">Connect</button>
+                    <button class="btn btn-danger" id="disconnectBtn" onclick="disconnectEventBus()" disabled style="margin-top: 10px;">Disconnect</button>
+                </div>
+
+                <div class="control-group">
+                    <h3>📨 Subscribe</h3>
+                    <div class="form-group">
+                        <label>Topics (comma-separated)</label>
+                        <input type="text" id="topics" value="scenario.*.events" placeholder="scenario.*.events">
+                    </div>
+                    <div class="form-group">
+                        <label>Consumer Group</label>
+                        <input type="text" id="consumerGroup" value="test-consumer" placeholder="test-consumer">
+                    </div>
+                    <button class="btn" id="subscribeBtn" onclick="subscribeToTopics()" disabled>Subscribe</button>
+                    <button class="btn btn-secondary" id="unsubscribeBtn" onclick="unsubscribeFromTopics()" disabled style="margin-top: 10px;">Unsubscribe</button>
+                </div>
+
+                <div class="control-group">
+                    <h3>📤 Publish Test Event</h3>
+                    <div class="form-group">
+                        <label>Event Type</label>
+                        <select id="eventType">
+                            <option value="workflow.trigger">workflow.trigger</option>
+                            <option value="workflow.node_completed">workflow.node_completed</option>
+                            <option value="workflow.node_failed">workflow.node_failed</option>
+                            <option value="workflow.compensation">workflow.compensation</option>
+                            <option value="test.custom">test.custom</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Topic</label>
+                        <input type="text" id="publishTopic" value="scenario.test.events" placeholder="scenario.test.events">
+                    </div>
+                    <button class="btn" id="publishBtn" onclick="publishTestEvent()">Publish Event</button>
+                </div>
+            </div>
+
+            <div class="events-container">
+                <div class="events-header">
+                    <h2>📋 Events Log</h2>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button class="btn btn-secondary" onclick="refreshEvents()" style="width: auto; padding: 8px 16px; font-size: 14px;">🔄 Обновить</button>
+                        <button class="clear-btn" onclick="clearEvents()">Clear</button>
+                    </div>
+                </div>
+                <div style="background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 12px; margin-bottom: 15px; border-radius: 4px; font-size: 0.9em;">
+                    <strong>💡 Подсказка:</strong> События отображаются из локального буфера. Для получения событий из Kafka:
+                    <ol style="margin: 8px 0 0 20px;">
+                        <li>Подключитесь к Event Bus (кнопка "Connect")</li>
+                        <li>Подпишитесь на топики (например, <code>scenario.*.events</code>)</li>
+                        <li>Опубликуйте тестовое событие или выполните workflow через Orchestrator</li>
+                    </ol>
+                </div>
+                <div class="events-list" id="eventsList">
+                    <div class="empty-state">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <p>No events received yet</p>
+                        <p style="font-size: 0.9em; margin-top: 10px; color: #999;">Попробуйте опубликовать тестовое событие или выполнить workflow</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let eventBusConnected = false;
+        let subscribed = false;
+        let events = [];
+
+        // Проверка статуса Kafka при загрузке
+        async function checkKafkaStatus() {
+            try {
+                const response = await fetch('/api/event-bus/status');
+                const data = await response.json();
+                
+                const statusEl = document.getElementById('kafkaStatus');
+                const hintEl = document.getElementById('kafkaHint');
+                if (data.kafkaAvailable) {
+                    statusEl.textContent = 'Available';
+                    statusEl.className = 'status-value status-connected';
+                    if (hintEl) hintEl.style.display = 'none';
+                } else {
+                    statusEl.textContent = 'Not Available';
+                    statusEl.className = 'status-value status-disconnected';
+                    if (hintEl) hintEl.style.display = 'block';
+                }
+            } catch (error) {
+                document.getElementById('kafkaStatus').textContent = 'Error';
+                document.getElementById('kafkaStatus').className = 'status-value status-disconnected';
+            }
+        }
+
+        // Подключение к Event Bus
+        async function connectEventBus() {
+            const brokers = document.getElementById('kafkaBrokers').value;
+            
+            try {
+                const response = await fetch('/api/event-bus/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ brokers: brokers.split(',') })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    eventBusConnected = true;
+                    document.getElementById('eventBusStatus').textContent = 'Connected';
+                    document.getElementById('eventBusStatus').className = 'status-value status-connected';
+                    document.getElementById('connectBtn').disabled = true;
+                    document.getElementById('disconnectBtn').disabled = false;
+                    document.getElementById('subscribeBtn').disabled = false;
+                    // Publish всегда доступен (события сохраняются в буфер даже без Kafka)
+                    document.getElementById('publishBtn').disabled = false;
+                } else {
+                    alert('Failed to connect: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error connecting to Event Bus: ' + error.message);
+            }
+        }
+
+        // Отключение от Event Bus
+        async function disconnectEventBus() {
+            try {
+                const response = await fetch('/api/event-bus/disconnect', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    eventBusConnected = false;
+                    subscribed = false;
+                    document.getElementById('eventBusStatus').textContent = 'Disconnected';
+                    document.getElementById('eventBusStatus').className = 'status-value status-disconnected';
+                    document.getElementById('connectBtn').disabled = false;
+                    document.getElementById('disconnectBtn').disabled = true;
+                    document.getElementById('subscribeBtn').disabled = true;
+                    document.getElementById('unsubscribeBtn').disabled = true;
+                    // Publish всегда доступен (события сохраняются в буфер даже без Kafka)
+                    document.getElementById('publishBtn').disabled = false;
+                }
+            } catch (error) {
+                alert('Error disconnecting: ' + error.message);
+            }
+        }
+
+        // Подписка на топики
+        async function subscribeToTopics() {
+            const topics = document.getElementById('topics').value.split(',').map(t => t.trim());
+            const groupId = document.getElementById('consumerGroup').value;
+
+            try {
+                const response = await fetch('/api/event-bus/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topics, groupId })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    subscribed = true;
+                    document.getElementById('subscribeBtn').disabled = true;
+                    document.getElementById('unsubscribeBtn').disabled = false;
+                    
+                    // Начинаем опрос событий
+                    startPollingEvents();
+                } else {
+                    alert('Failed to subscribe: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error subscribing: ' + error.message);
+            }
+        }
+
+        // Отписка от топиков
+        async function unsubscribeFromTopics() {
+            try {
+                const response = await fetch('/api/event-bus/unsubscribe', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    subscribed = false;
+                    document.getElementById('subscribeBtn').disabled = false;
+                    document.getElementById('unsubscribeBtn').disabled = true;
+                }
+            } catch (error) {
+                alert('Error unsubscribing: ' + error.message);
+            }
+        }
+
+        // Публикация тестового события
+        async function publishTestEvent() {
+            const eventType = document.getElementById('eventType').value;
+            const topic = document.getElementById('publishTopic').value;
+
+            try {
+                const response = await fetch('/api/event-bus/publish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: eventType,
+                        topic: topic,
+                        payload: {
+                            test: true,
+                            timestamp: new Date().toISOString(),
+                            message: 'Test event from Event Bus UI',
+                            executionId: 'test-exec-' + Date.now()
+                        }
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    console.log('[EventBus] Event published successfully');
+                    // Ждем немного и обновляем список событий
+                    setTimeout(() => {
+                        refreshEvents();
+                    }, 300);
+                } else {
+                    alert('Failed to publish: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error publishing event: ' + error.message);
+            }
+        }
+
+        // Опрос событий
+        let pollingInterval = null;
+        let lastEventCount = 0;
+        
+        function startPollingEvents() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            
+            pollingInterval = setInterval(async () => {
+                // Опрашиваем события даже если не подписаны (для просмотра опубликованных событий)
+                try {
+                    const response = await fetch('/api/event-bus/events?limit=100');
+                    const data = await response.json();
+                    
+                    if (data.events && data.events.length > 0) {
+                        // Добавляем только новые события (которых еще нет в локальном массиве)
+                        const existingIds = new Set(events.map(e => e.metadata.eventId));
+                        const newEvents = data.events.filter(e => !existingIds.has(e.metadata.eventId));
+                        
+                        newEvents.forEach(event => {
+                            addEvent(event);
+                        });
+                        
+                        // Обновляем счетчик событий
+                        document.getElementById('eventsCount').textContent = events.length;
+                    }
+                } catch (error) {
+                    console.error('Error polling events:', error);
+                }
+            }, 2000); // Опрос каждые 2 секунды
+        }
+
+        // Добавление события в список
+        function addEvent(event) {
+            // Проверяем, нет ли уже такого события
+            const exists = events.some(e => e.metadata.eventId === event.metadata.eventId);
+            if (exists) {
+                return; // Событие уже есть, не добавляем дубликат
+            }
+            
+            events.unshift(event);
+            if (events.length > 100) events.pop(); // Ограничиваем до 100 событий
+            
+            updateEventsList();
+            document.getElementById('eventsCount').textContent = events.length;
+        }
+
+        // Обновление списка событий
+        function updateEventsList() {
+            const listEl = document.getElementById('eventsList');
+            
+            if (events.length === 0) {
+                listEl.innerHTML = `
+                    <div class="empty-state">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <p>No events received yet</p>
+                    </div>
+                `;
+                return;
+            }
+
+            listEl.innerHTML = events.map(event => {
+                const badgeClass = event.type && event.type.includes('failed') ? 'badge-error' : 
+                                 event.type && event.type.includes('completed') ? 'badge-success' : 'badge-info';
+                
+                // Безопасная обработка timestamp
+                let timestampStr = 'Unknown';
+                try {
+                    if (event.metadata && event.metadata.timestamp) {
+                        const ts = typeof event.metadata.timestamp === 'string' 
+                            ? new Date(event.metadata.timestamp) 
+                            : new Date(event.metadata.timestamp);
+                        timestampStr = ts.toLocaleTimeString();
+                    }
+                } catch (e) {
+                    console.warn('Error parsing timestamp:', e);
+                }
+                
+                return `
+                    <div class="event-item">
+                        <div class="event-header">
+                            <span class="event-type">${event.type || 'unknown'}</span>
+                            <span class="badge ${badgeClass}">${event.type ? event.type.split('.').pop() : 'unknown'}</span>
+                            <span class="event-time">${timestampStr}</span>
+                        </div>
+                        <div class="event-details">
+                            <div><strong>Event ID:</strong> ${event.metadata?.eventId || 'N/A'}</div>
+                            <div><strong>Correlation ID:</strong> ${event.metadata?.correlationId || 'N/A'}</div>
+                            ${event.payload?.executionId ? `<div><strong>Execution ID:</strong> ${event.payload.executionId}</div>` : ''}
+                        </div>
+                        <div class="event-payload">${JSON.stringify(event.payload || {}, null, 2)}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Очистка событий
+        function clearEvents() {
+            events = [];
+            updateEventsList();
+            document.getElementById('eventsCount').textContent = '0';
+        }
+
+        // Обновление событий вручную
+        async function refreshEvents() {
+            try {
+                const response = await fetch('/api/event-bus/events?limit=100');
+                const data = await response.json();
+                
+                console.log('[EventBus] Refresh events response:', data);
+                
+                if (data.events && Array.isArray(data.events) && data.events.length > 0) {
+                    const existingIds = new Set(events.map(e => e.metadata?.eventId).filter(id => id));
+                    const newEvents = data.events.filter(e => e.metadata?.eventId && !existingIds.has(e.metadata.eventId));
+                    
+                    console.log(`[EventBus] Found ${data.events.length} events, ${newEvents.length} new, local: ${events.length}`);
+                    
+                    if (newEvents.length > 0) {
+                        newEvents.forEach(event => {
+                            addEvent(event);
+                        });
+                        console.log(`[EventBus] Added ${newEvents.length} new events`);
+                    } else if (data.events.length > 0 && events.length === 0) {
+                        // Если события есть на сервере, но нет локально - загружаем все
+                        console.log('[EventBus] Loading all events from server (first load)');
+                        data.events.forEach(event => {
+                            addEvent(event);
+                        });
+                    }
+                } else {
+                    console.log('[EventBus] No events in response:', data);
+                }
+            } catch (error) {
+                console.error('[EventBus] Error refreshing events:', error);
+            }
+        }
+
+        // Инициализация при загрузке
+        window.addEventListener('load', () => {
+            checkKafkaStatus();
+            setInterval(checkKafkaStatus, 10000); // Проверка каждые 10 секунд
+            
+            // Загружаем события сразу при загрузке страницы (с небольшой задержкой)
+            setTimeout(() => {
+                refreshEvents();
+            }, 500);
+            
+            // Запускаем опрос событий сразу (для просмотра опубликованных событий)
+            startPollingEvents();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,277 @@
+// Prisma Schema для Scenario Builder
+// База данных для хранения сценариев, выполнений, событий и метаданных
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Сценарий (Scenario Spec)
+model Scenario {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  spec        String   // JSON строка с ScenarioSpec
+  version     String   @default("1.0.0")
+  status      String   @default("draft") // draft, active, archived
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Связи
+  executions  Execution[]
+  templates   Template[]
+  jobs        ScenarioJob[]
+  
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Шаблон сценария (Template Library)
+model Template {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  category    String   // saga, approval, async_callbacks, crm, antifraud, etc.
+  spec        String   // JSON строка с ScenarioSpec
+  scenarioId  String? // Если шаблон основан на существующем сценарии
+  tags        String?  // JSON массив тегов
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  scenario    Scenario? @relation(fields: [scenarioId], references: [id])
+  
+  @@index([category])
+  @@index([name])
+}
+
+// Выполнение сценария (Execution)
+model Execution {
+  id            String   @id @default(uuid())
+  scenarioId    String
+  executionId   String   @unique // UUID выполнения
+  userId        String?
+  userRoles     String?  // JSON массив ролей
+  status        String   @default("pending") // pending, running, completed, failed, compensated
+  currentNodeId String?
+  traceId       String?
+  spanId        String?
+  startedAt     DateTime @default(now())
+  completedAt   DateTime?
+  failedAt      DateTime?
+  errorMessage  String?
+  errorCode     String?
+  
+  // Связи
+  scenario      Scenario        @relation(fields: [scenarioId], references: [id])
+  events        ExecutionEvent[]
+  nodeExecutions NodeExecution[]
+  compensations Compensation[]
+  
+  @@index([scenarioId])
+  @@index([executionId])
+  @@index([status])
+  @@index([startedAt])
+  @@index([userId])
+}
+
+// Событие выполнения (для восстановления состояния)
+model ExecutionEvent {
+  id            String   @id @default(uuid())
+  executionId   String
+  type          String   // trigger, node_started, node_completed, node_failed, compensation, etc.
+  nodeId        String?
+  data          String?  // JSON данные события
+  metadata      String?  // JSON метаданные (eventId, correlationId, etc.)
+  timestamp     DateTime @default(now())
+  
+  execution     Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  
+  @@index([executionId])
+  @@index([type])
+  @@index([timestamp])
+}
+
+// Выполнение узла workflow
+model NodeExecution {
+  id            String   @id @default(uuid())
+  executionId   String
+  nodeId        String
+  state         String   @default("pending") // pending, running, completed, failed, compensated
+  input         String?  // JSON входные данные
+  output        String?  // JSON выходные данные
+  error         String?  // JSON ошибка
+  retryCount    Int      @default(0)
+  startedAt     DateTime?
+  completedAt   DateTime?
+  duration      Int?     // миллисекунды
+  
+  execution     Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  
+  @@unique([executionId, nodeId])
+  @@index([executionId])
+  @@index([nodeId])
+  @@index([state])
+}
+
+// Компенсация (Saga pattern)
+model Compensation {
+  id            String   @id @default(uuid())
+  executionId   String
+  nodeId        String
+  reason        String
+  action        String   // JSON действие для компенсации
+  status        String   @default("pending") // pending, completed, failed
+  executedAt    DateTime?
+  createdAt     DateTime @default(now())
+  
+  execution     Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  
+  @@index([executionId])
+  @@index([status])
+}
+
+// Инструмент (Tool)
+model Tool {
+  id              String   @id @default(uuid())
+  toolId          String   @unique
+  name            String
+  description     String?
+  inputSchema     String?  // JSON Schema для входов
+  outputSchema    String?  // JSON Schema для выходов
+  riskClass       String   @default("safe") // safe, moderate, high, requires_approval
+  sla             String?  // JSON с SLA данными
+  rateLimit       String?  // JSON с rate limit настройками
+  authRequired    Boolean  @default(false)
+  authScopes      String?  // JSON массив scope'ов
+  idempotent      Boolean  @default(false)
+  idempotencyKey  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([toolId])
+  @@index([riskClass])
+}
+
+// Память агента (Agent Memory)
+model AgentMemory {
+  id            String   @id @default(uuid())
+  memoryType    String   // short_term, long_term
+  executionId   String?
+  scenarioId   String?
+  content       String   // Текст содержимого
+  embedding     String?  // JSON массив чисел (векторное представление)
+  metadata      String?  // JSON метаданные
+  tags          String?  // JSON массив тегов
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([memoryType])
+  @@index([executionId])
+  @@index([scenarioId])
+  @@index([createdAt])
+}
+
+// Конфигурация системы
+model Configuration {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String   // JSON значение
+  category    String   @default("general") // general, llm, event_bus, observability, etc.
+  description String?
+  updatedAt   DateTime @updatedAt
+  updatedBy   String?
+  
+  @@index([category])
+  @@index([key])
+}
+
+// Метрики (для истории)
+model Metric {
+  id          String   @id @default(uuid())
+  name        String
+  value       Float
+  labels      String?  // JSON объект с labels
+  timestamp   DateTime @default(now())
+  
+  @@index([name])
+  @@index([timestamp])
+}
+
+// Очередь сценариев (Scenario Queue)
+model ScenarioQueue {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  status      String   @default("active") // active, paused, stopped
+  priority    Int      @default(0) // чем выше, тем приоритетнее
+  maxConcurrency Int   @default(10) // максимальное количество одновременных выполнений
+  retryConfig String?  // JSON с настройками повторов
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Связи
+  jobs        ScenarioJob[]
+  triggers    QueueTrigger[]
+  
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+}
+
+// Триггер очереди (связь между событиями и очередями)
+model QueueTrigger {
+  id          String   @id @default(uuid())
+  queueId     String
+  eventType   String   // тип события для подписки
+  topic       String   // Kafka topic
+  filter      String?  // JSON фильтр для событий (опционально)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  queue       ScenarioQueue @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  
+  @@index([queueId])
+  @@index([eventType])
+  @@index([topic])
+  @@index([enabled])
+}
+
+// Задание в очереди (Scenario Job)
+model ScenarioJob {
+  id          String   @id @default(uuid())
+  queueId     String
+  scenarioId  String
+  status      String   @default("pending") // pending, queued, running, completed, failed, cancelled
+  priority    Int      @default(0)
+  input       String?  // JSON входные данные для сценария
+  output      String?  // JSON выходные данные
+  error       String?  // JSON ошибка
+  retryCount  Int      @default(0)
+  maxRetries  Int      @default(3)
+  executionId String?  // ID выполнения сценария (если создано)
+  eventId     String?  // ID события, которое вызвало задание
+  correlationId String? // для отслеживания цепочки событий
+  createdAt   DateTime @default(now())
+  queuedAt    DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  failedAt    DateTime?
+  
+  // Связи
+  queue       ScenarioQueue @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  scenario    Scenario      @relation(fields: [scenarioId], references: [id])
+  
+  @@index([queueId])
+  @@index([scenarioId])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@index([eventId])
+  @@index([correlationId])
+}

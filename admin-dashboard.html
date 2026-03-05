@@ -1,10 +1,10 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - Scenario Builder</title>
-    <link rel="stylesheet" href="admin-styles.css">
+    <link rel="stylesheet" href="/admin-styles.css">
     <style>
         /* Дополнительные стили для workflow steps */
         .workflow-steps {
@@ -59,23 +59,31 @@
                 <span>Scenario Builder Admin</span>
             </div>
             <div class="nav-links">
-                <a href="admin-dashboard.html" class="nav-link active">
+                <a href="/admin-dashboard.html" class="nav-link active">
                     <span>📊</span>
                     <span>Overview</span>
                 </a>
-                <a href="admin-components.html" class="nav-link">
+                <a href="/admin-components.html" class="nav-link">
                     <span>🧩</span>
                     <span>Components</span>
                 </a>
-                <a href="admin-testing.html" class="nav-link">
+                <a href="/admin-testing.html" class="nav-link">
                     <span>🧪</span>
                     <span>Testing</span>
                 </a>
-                <a href="admin-monitoring.html" class="nav-link">
+                <a href="/admin-monitoring.html" class="nav-link">
                     <span>📈</span>
                     <span>Monitoring</span>
                 </a>
-                <a href="admin-config.html" class="nav-link">
+                <a href="/admin-scenarios.html" class="nav-link">
+                    <span>📋</span>
+                    <span>Scenarios</span>
+                </a>
+                <a href="/admin-queues.html" class="nav-link">
+                    <span>🔄</span>
+                    <span>Queues</span>
+                </a>
+                <a href="/admin-config.html" class="nav-link">
                     <span>⚙️</span>
                     <span>Configuration</span>
                 </a>
@@ -143,29 +151,37 @@
                 </h2>
             </div>
             <div class="action-grid">
-                <a href="admin-testing.html" class="action-btn">
+                <a href="/admin-testing.html" class="action-btn">
                     <span>🧪</span>
                     <span>Run Tests</span>
                 </a>
-                <a href="admin-monitoring.html" class="action-btn secondary">
+                <a href="/admin-monitoring.html" class="action-btn secondary">
                     <span>📈</span>
                     <span>View Metrics</span>
                 </a>
-                <a href="test-agent.html" class="action-btn success">
+                <a href="/test-agent.html" class="action-btn success">
                     <span>🤖</span>
                     <span>Test Agent</span>
                 </a>
-                <a href="test-orchestrator.html" class="action-btn success">
+                <a href="/test-orchestrator.html" class="action-btn success">
                     <span>🔄</span>
                     <span>Test Orchestrator</span>
                 </a>
-                <a href="test-event-bus.html" class="action-btn success">
+                <a href="/test-event-bus.html" class="action-btn success">
                     <span>📡</span>
                     <span>Test Event Bus</span>
                 </a>
-                <a href="observability-dashboard.html" class="action-btn warning">
+                <a href="/observability-dashboard.html" class="action-btn warning">
                     <span>📊</span>
                     <span>Observability</span>
+                </a>
+                <a href="/admin-scenarios.html" class="action-btn">
+                    <span>📋</span>
+                    <span>Manage Scenarios</span>
+                </a>
+                <a href="/admin-queues.html" class="action-btn">
+                    <span>🔄</span>
+                    <span>Manage Queues</span>
                 </a>
             </div>
         </div>
@@ -198,7 +214,7 @@
                         <div class="step-title">Настройка и конфигурация</div>
                         <div class="step-description">Проверьте конфигурацию системы, настройте инструменты и подключения</div>
                     </div>
-                    <a href="admin-config.html" class="action-btn" style="padding: 8px 16px; font-size: 0.875em;">Настроить →</a>
+                    <a href="/admin-config.html" class="action-btn" style="padding: 8px 16px; font-size: 0.875em;">Настроить →</a>
                 </div>
                 <div class="workflow-step">
                     <div class="step-number">2</div>
@@ -206,7 +222,7 @@
                         <div class="step-title">Тестирование компонентов</div>
                         <div class="step-description">Протестируйте каждый компонент системы перед интеграцией</div>
                     </div>
-                    <a href="admin-testing.html" class="action-btn" style="padding: 8px 16px; font-size: 0.875em;">Тестировать →</a>
+                    <a href="/admin-testing.html" class="action-btn" style="padding: 8px 16px; font-size: 0.875em;">Тестировать →</a>
                 </div>
                 <div class="workflow-step">
                     <div class="step-number">3</div>
@@ -214,7 +230,7 @@
                         <div class="step-title">Мониторинг и диагностика</div>
                         <div class="step-description">Отслеживайте метрики, логи и трассировки для выявления проблем</div>
                     </div>
-                    <a href="admin-monitoring.html" class="action-btn" style="padding: 8px 16px; font-size: 0.875em;">Мониторить →</a>
+                    <a href="/admin-monitoring.html" class="action-btn" style="padding: 8px 16px; font-size: 0.875em;">Мониторить →</a>
                 </div>
                 <div class="workflow-step">
                     <div class="step-number">4</div>
@@ -222,13 +238,13 @@
                         <div class="step-title">Проверка перед релизом</div>
                         <div class="step-description">Убедитесь, что все компоненты работают корректно и нет критических проблем</div>
                     </div>
-                    <a href="admin-testing.html#pre-release" class="action-btn warning" style="padding: 8px 16px; font-size: 0.875em;">Проверить →</a>
+                    <a href="/admin-testing.html#pre-release" class="action-btn warning" style="padding: 8px 16px; font-size: 0.875em;">Проверить →</a>
                 </div>
             </div>
         </div>
     </div>
 
-    <script src="admin-common.js"></script>
+    <script src="/admin-common.js"></script>
     <script>
         // Загрузка данных системы
         async function loadSystemData() {

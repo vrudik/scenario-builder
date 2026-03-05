@@ -3,6 +3,11 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
+// Устанавливаем DATABASE_URL по умолчанию для Prisma
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = 'file:./dev.db';
+}
+
 const PORT = 3000;
 
 // Хранилище метрик для экспорта
@@ -224,18 +229,21 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(HTML);
   } else if (pathname.startsWith('/admin-') && pathname.endsWith('.html')) {
-    // Отдача админ-страниц (проверяем раньше других маршрутов)
+    // Отдача админ-страниц (сначала из web/admin/, затем из корня)
     try {
-      // Убираем начальный слэш для правильного формирования пути
       const fileName = pathname.startsWith('/') ? pathname.substring(1) : pathname;
-      const adminPagePath = path.join(__dirname, fileName);
-      console.log('[DEBUG] Trying to load admin page:', adminPagePath);
+      let adminPagePath = path.join(__dirname, 'web', 'admin', fileName);
+      
+      // Если файл не найден в web/admin/, ищем в корне
+      if (!fs.existsSync(adminPagePath)) {
+        adminPagePath = path.join(__dirname, fileName);
+      }
+      
       if (fs.existsSync(adminPagePath)) {
         const adminPage = fs.readFileSync(adminPagePath, 'utf-8');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(adminPage);
       } else {
-        console.log('[DEBUG] Admin page not found:', adminPagePath);
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Admin page not found: ' + pathname + ' (tried: ' + adminPagePath + ')');
       }
@@ -245,9 +253,12 @@ const server = http.createServer(async (req, res) => {
       res.end('Error loading admin page: ' + error.message);
     }
   } else if (pathname === '/test-agent.html' || pathname === '/test-agent') {
-    // Отдача тестовой страницы
+    // Отдача тестовой страницы (сначала из web/test/, затем из корня)
     try {
-      const testPagePath = path.join(__dirname, 'test-agent.html');
+      let testPagePath = path.join(__dirname, 'web', 'test', 'test-agent.html');
+      if (!fs.existsSync(testPagePath)) {
+        testPagePath = path.join(__dirname, 'test-agent.html');
+      }
       if (fs.existsSync(testPagePath)) {
         const testPage = fs.readFileSync(testPagePath, 'utf-8');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -261,9 +272,12 @@ const server = http.createServer(async (req, res) => {
       res.end('Error loading test page: ' + error.message);
     }
   } else if (pathname === '/test-orchestrator.html' || pathname === '/test-orchestrator') {
-    // Отдача страницы тестирования Orchestrator
+    // Отдача страницы тестирования Orchestrator (сначала из web/test/, затем из корня)
     try {
-      const testPagePath = path.join(__dirname, 'test-orchestrator.html');
+      let testPagePath = path.join(__dirname, 'web', 'test', 'test-orchestrator.html');
+      if (!fs.existsSync(testPagePath)) {
+        testPagePath = path.join(__dirname, 'test-orchestrator.html');
+      }
       if (fs.existsSync(testPagePath)) {
         const testPage = fs.readFileSync(testPagePath, 'utf-8');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -277,9 +291,12 @@ const server = http.createServer(async (req, res) => {
       res.end('Error loading test orchestrator page: ' + error.message);
     }
   } else if (pathname === '/test-event-bus.html' || pathname === '/test-event-bus') {
-    // Отдача страницы тестирования Event Bus
+    // Отдача страницы тестирования Event Bus (сначала из web/test/, затем из корня)
     try {
-      const testPagePath = path.join(__dirname, 'test-event-bus.html');
+      let testPagePath = path.join(__dirname, 'web', 'test', 'test-event-bus.html');
+      if (!fs.existsSync(testPagePath)) {
+        testPagePath = path.join(__dirname, 'test-event-bus.html');
+      }
       if (fs.existsSync(testPagePath)) {
         const testPage = fs.readFileSync(testPagePath, 'utf-8');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -293,11 +310,16 @@ const server = http.createServer(async (req, res) => {
       res.end('Error loading test event bus page: ' + error.message);
     }
   } else if (pathname === '/admin-styles.css' || pathname === '/admin-common.js') {
-    // Отдача общих ресурсов админ-панели
+    // Отдача общих ресурсов админ-панели (сначала из web/admin/, затем из корня)
     try {
-      // Убираем начальный слэш для правильного формирования пути
       const fileName = pathname.startsWith('/') ? pathname.substring(1) : pathname;
-      const resourcePath = path.join(__dirname, fileName);
+      let resourcePath = path.join(__dirname, 'web', 'admin', fileName);
+      
+      // Если файл не найден в web/admin/, ищем в корне
+      if (!fs.existsSync(resourcePath)) {
+        resourcePath = path.join(__dirname, fileName);
+      }
+      
       if (fs.existsSync(resourcePath)) {
         const content = fs.readFileSync(resourcePath, 'utf-8');
         const contentType = pathname.endsWith('.css') ? 'text/css' : 'application/javascript';
@@ -305,16 +327,19 @@ const server = http.createServer(async (req, res) => {
         res.end(content);
       } else {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Resource not found: ' + pathname + ' (tried: ' + resourcePath + ')');
+        res.end('Resource not found: ' + pathname);
       }
     } catch (error) {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end('Error loading resource: ' + error.message);
     }
   } else if (pathname === '/observability-dashboard.html' || pathname === '/observability') {
-    // Отдача observability dashboard
+    // Отдача observability dashboard (сначала из web/, затем из корня)
     try {
-      const dashboardPath = path.join(__dirname, 'observability-dashboard.html');
+      let dashboardPath = path.join(__dirname, 'web', 'observability-dashboard.html');
+      if (!fs.existsSync(dashboardPath)) {
+        dashboardPath = path.join(__dirname, 'observability-dashboard.html');
+      }
       if (fs.existsSync(dashboardPath)) {
         const dashboard = fs.readFileSync(dashboardPath, 'utf-8');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -328,9 +353,12 @@ const server = http.createServer(async (req, res) => {
       res.end('Error loading observability dashboard: ' + error.message);
     }
   } else if (pathname === '/dashboard.html' || pathname === '/dashboard') {
-    // Отдача dashboard
+    // Отдача dashboard (сначала из web/, затем из корня)
     try {
-      const dashboardPath = path.join(__dirname, 'dashboard.html');
+      let dashboardPath = path.join(__dirname, 'web', 'dashboard.html');
+      if (!fs.existsSync(dashboardPath)) {
+        dashboardPath = path.join(__dirname, 'dashboard.html');
+      }
       if (fs.existsSync(dashboardPath)) {
         const dashboard = fs.readFileSync(dashboardPath, 'utf-8');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -608,6 +636,1082 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         }));
       }
     });
+  } else if (pathname.startsWith('/api/queues')) {
+    // API для работы с очередями сценариев через БД
+      console.log('[DEBUG] Queues API request:', req.method, pathname);
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      
+      // Обработка GET запросов сразу (без body)
+      if (req.method === 'GET') {
+        (async () => {
+          try {
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const pathParts = pathname.split('/').filter(p => p);
+            let command = '';
+            let requestData = {};
+            
+            if (pathParts.length === 4 && pathParts[3] === 'jobs') {
+              // GET /api/queues/:id/jobs
+              command = 'get-jobs';
+              requestData = {
+                queueId: pathParts[2],
+                status: url.searchParams.get('status'),
+                limit: url.searchParams.get('limit'),
+                offset: url.searchParams.get('offset'),
+              };
+            } else if (pathParts.length === 4 && pathParts[3] === 'stats') {
+              // GET /api/queues/:id/stats
+              command = 'get-stats';
+              requestData = { queueId: pathParts[2] };
+            } else if (pathParts.length === 3) {
+              // GET /api/queues/:id
+              command = 'get';
+              requestData = { id: pathParts[2] };
+            } else {
+              // GET /api/queues
+              command = 'list';
+              requestData = {
+                status: url.searchParams.get('status'),
+                limit: url.searchParams.get('limit'),
+                offset: url.searchParams.get('offset'),
+              };
+            }
+            
+            // Выполняем через tsx
+            const tempRequestFile = path.join(__dirname, `temp-queues-${Date.now()}.json`);
+            fs.writeFileSync(tempRequestFile, JSON.stringify(requestData), 'utf-8');
+            
+            const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+            const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+            const scriptPath = path.join(__dirname, 'src', 'web', 'queues-api.ts');
+            
+            console.log(`[Queues API] Executing: ${command} with data:`, JSON.stringify(requestData));
+            
+            let stdout, stderr;
+            try {
+              const execResult = await execAsync(
+                `${tsxCmd} "${scriptPath}" "${command}" "${tempRequestFile}"`,
+                { cwd: __dirname, maxBuffer: 10 * 1024 * 1024, timeout: 30000 }
+              );
+              stdout = execResult.stdout;
+              stderr = execResult.stderr;
+            } catch (execError) {
+              stdout = execError.stdout || '';
+              stderr = execError.stderr || '';
+            }
+            
+            // Удаляем временный файл
+            try {
+              fs.unlinkSync(tempRequestFile);
+            } catch (e) {
+              // Игнорируем ошибки удаления
+            }
+            
+            // Парсим результат (используем ту же логику, что и для scenarios)
+            if (!stdout || stdout.trim().length === 0) {
+              throw new Error('Empty response from queues-api.ts');
+            }
+            
+            const lines = stdout.trim().split('\n').filter(line => line.trim());
+            let jsonLine = null;
+            
+            // Ищем JSON строку в выводе
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i].trim();
+              if (!line) continue;
+              
+              // Пропускаем строки с логами PowerShell
+              if (line.startsWith('[LOG]') || line.startsWith('[WARN]') || line.startsWith('[ERROR]') || line.startsWith('[INFO]') || 
+                  line.includes('prisma:query') || line.includes('prisma:') || 
+                  line.startsWith('node.exe') || line.startsWith('node ') ||
+                  line.startsWith('At line:') || line.startsWith('+ CategoryInfo:') ||
+                  line.includes('RemoteException') || line.includes('NativeCommandError') ||
+                  line.startsWith('& "') || line.startsWith('C:\\Program Files') ||
+                  line.startsWith('At C:') || line.startsWith('At ') ||
+                  line.includes('CategoryInfo') || line.includes('FullyQualifiedErrorId') ||
+                  line.startsWith('[path]') || line.includes('"[path]"') ||
+                  /^\s*\+.*CategoryInfo/.test(line) || /^\s*\+.*FullyQualifiedErrorId/.test(line) ||
+                  line.startsWith('tsx.cmd')) {
+                continue;
+              }
+              
+              if (line.startsWith('{') && line.endsWith('}')) {
+                try {
+                  const parsed = JSON.parse(line);
+                  if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                    jsonLine = line;
+                    break;
+                  }
+                } catch (e) {
+                  continue;
+                }
+              }
+            }
+            
+            // Если не нашли в одной строке, пробуем собрать многострочный JSON
+            if (!jsonLine) {
+              let jsonStartIndex = -1;
+              for (let i = 0; i < lines.length; i++) {
+                const trimmed = lines[i].trim();
+                if (trimmed.startsWith('{') && 
+                    !trimmed.startsWith('[LOG]') && !trimmed.startsWith('[WARN]') &&
+                    !trimmed.startsWith('[ERROR]') && !trimmed.startsWith('[INFO]') &&
+                    !trimmed.includes('prisma:query') && !trimmed.includes('prisma:') &&
+                    !trimmed.startsWith('node.exe') && !trimmed.startsWith('node ') &&
+                    !trimmed.startsWith('At line:') && !trimmed.startsWith('+ CategoryInfo:') &&
+                    !trimmed.includes('RemoteException') && !trimmed.includes('NativeCommandError') &&
+                    !trimmed.startsWith('& "') && !trimmed.startsWith('C:\\Program Files') &&
+                    !trimmed.startsWith('At C:') && !trimmed.startsWith('At ') &&
+                    !trimmed.includes('CategoryInfo') && !trimmed.includes('FullyQualifiedErrorId') &&
+                    !trimmed.startsWith('[path]') && !trimmed.includes('"[path]"') &&
+                    !/^\s*\+.*CategoryInfo/.test(trimmed) && !/^\s*\+.*FullyQualifiedErrorId/.test(trimmed) &&
+                    !trimmed.startsWith('tsx.cmd')) {
+                  jsonStartIndex = i;
+                  break;
+                }
+              }
+              
+              if (jsonStartIndex !== -1) {
+                let braceCount = 0;
+                let jsonLines = [];
+                
+                for (let i = jsonStartIndex; i < lines.length; i++) {
+                  const line = lines[i];
+                  jsonLines.push(line);
+                  
+                  for (const char of line) {
+                    if (char === '{') braceCount++;
+                    if (char === '}') braceCount--;
+                  }
+                  
+                  if (braceCount === 0) {
+                    const jsonStr = jsonLines.join('\n').trim();
+                    try {
+                      const parsed = JSON.parse(jsonStr);
+                      if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                        jsonLine = jsonStr;
+                        break;
+                      }
+                    } catch (e) {
+                      // Не валидный JSON
+                    }
+                    break;
+                  }
+                }
+              }
+            }
+            
+            if (!jsonLine) {
+              throw new Error('No valid JSON response from queues-api.ts');
+            }
+            
+            const result = JSON.parse(jsonLine);
+            const statusCode = result.success ? 200 : (result.error?.code === 'NOT_FOUND' ? 404 : 400);
+            
+            res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+            res.end(jsonLine);
+          } catch (error) {
+            console.error('[Queues API] Error:', error);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: { code: 'INTERNAL_ERROR', message: error.message }
+            }));
+          }
+        })();
+        return;
+      }
+      
+      // Обработка POST, PUT, DELETE запросов (с body)
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const url = new URL(req.url, `http://${req.headers.host}`);
+          const pathParts = pathname.split('/').filter(p => p);
+          let command = '';
+          let requestData = {};
+          
+          if (req.method === 'POST') {
+            if (pathParts.length === 4 && pathParts[3] === 'triggers') {
+              // POST /api/queues/:id/triggers
+              command = 'add-trigger';
+              requestData = { ...JSON.parse(body), queueId: pathParts[2] };
+            } else if (pathParts.length === 4 && pathParts[3] === 'jobs') {
+              // POST /api/queues/:id/jobs
+              command = 'add-job';
+              requestData = { ...JSON.parse(body), queueId: pathParts[2] };
+            } else {
+              // POST /api/queues
+              command = 'create';
+              requestData = JSON.parse(body);
+            }
+          } else if (req.method === 'PUT') {
+            // PUT /api/queues/:id
+            command = 'update';
+            requestData = { ...JSON.parse(body), id: pathParts[2] };
+          } else if (req.method === 'DELETE') {
+            if (pathParts.length === 5 && pathParts[3] === 'triggers') {
+              // DELETE /api/queues/:id/triggers/:triggerId
+              command = 'remove-trigger';
+              requestData = { triggerId: pathParts[4] };
+            } else {
+              // DELETE /api/queues/:id
+              command = 'delete';
+              requestData = { id: pathParts[2] };
+            }
+          }
+          
+          if (!command) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: { code: 'INVALID_METHOD', message: 'Method not supported' }
+            }));
+            return;
+          }
+          
+          // Выполняем через tsx
+          const tempRequestFile = path.join(__dirname, `temp-queues-${Date.now()}.json`);
+          fs.writeFileSync(tempRequestFile, JSON.stringify(requestData), 'utf-8');
+          
+          const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+          const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+          const scriptPath = path.join(__dirname, 'src', 'web', 'queues-api.ts');
+          
+          console.log(`[Queues API] Executing: ${command} with data:`, JSON.stringify(requestData));
+          
+          let stdout, stderr;
+          try {
+            const execResult = await execAsync(
+              `${tsxCmd} "${scriptPath}" "${command}" "${tempRequestFile}"`,
+              { cwd: __dirname, maxBuffer: 10 * 1024 * 1024, timeout: 30000 }
+            );
+            stdout = execResult.stdout;
+            stderr = execResult.stderr;
+          } catch (execError) {
+            stdout = execError.stdout || '';
+            stderr = execError.stderr || '';
+          }
+          
+          // Удаляем временный файл
+          try {
+            fs.unlinkSync(tempRequestFile);
+          } catch (e) {
+            // Игнорируем ошибки удаления
+          }
+          
+          // Парсим результат (используем ту же логику, что и для scenarios)
+          if (!stdout || stdout.trim().length === 0) {
+            throw new Error('Empty response from queues-api.ts');
+          }
+          
+          const lines = stdout.trim().split('\n').filter(line => line.trim());
+          let jsonLine = null;
+          
+          // Ищем JSON строку в выводе
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            // Пропускаем строки с логами PowerShell
+            if (line.startsWith('[LOG]') || line.startsWith('[WARN]') || line.startsWith('[ERROR]') || line.startsWith('[INFO]') || 
+                line.includes('prisma:query') || line.includes('prisma:') || 
+                line.startsWith('node.exe') || line.startsWith('node ') ||
+                line.startsWith('At line:') || line.startsWith('+ CategoryInfo:') ||
+                line.includes('RemoteException') || line.includes('NativeCommandError') ||
+                line.startsWith('& "') || line.startsWith('C:\\Program Files') ||
+                line.startsWith('At C:') || line.startsWith('At ') ||
+                line.includes('CategoryInfo') || line.includes('FullyQualifiedErrorId') ||
+                line.startsWith('[path]') || line.includes('"[path]"') ||
+                /^\s*\+.*CategoryInfo/.test(line) || /^\s*\+.*FullyQualifiedErrorId/.test(line) ||
+                line.startsWith('tsx.cmd')) {
+              continue;
+            }
+            
+            if (line.startsWith('{') && line.endsWith('}')) {
+              try {
+                const parsed = JSON.parse(line);
+                if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                  jsonLine = line;
+                  break;
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+          }
+          
+          // Если не нашли в одной строке, пробуем собрать многострочный JSON
+          if (!jsonLine) {
+            let jsonStartIndex = -1;
+            for (let i = 0; i < lines.length; i++) {
+              const trimmed = lines[i].trim();
+              if (trimmed.startsWith('{') && 
+                  !trimmed.startsWith('[LOG]') && !trimmed.startsWith('[WARN]') &&
+                  !trimmed.startsWith('[ERROR]') && !trimmed.startsWith('[INFO]') &&
+                  !trimmed.includes('prisma:query') && !trimmed.includes('prisma:') &&
+                  !trimmed.startsWith('node.exe') && !trimmed.startsWith('node ') &&
+                  !trimmed.startsWith('At line:') && !trimmed.startsWith('+ CategoryInfo:') &&
+                  !trimmed.includes('RemoteException') && !trimmed.includes('NativeCommandError') &&
+                  !trimmed.startsWith('& "') && !trimmed.startsWith('C:\\Program Files') &&
+                  !trimmed.startsWith('At C:') && !trimmed.startsWith('At ') &&
+                  !trimmed.includes('CategoryInfo') && !trimmed.includes('FullyQualifiedErrorId') &&
+                  !trimmed.startsWith('[path]') && !trimmed.includes('"[path]"') &&
+                  !/^\s*\+.*CategoryInfo/.test(trimmed) && !/^\s*\+.*FullyQualifiedErrorId/.test(trimmed) &&
+                  !trimmed.startsWith('tsx.cmd')) {
+                jsonStartIndex = i;
+                break;
+              }
+            }
+            
+            if (jsonStartIndex !== -1) {
+              let braceCount = 0;
+              let jsonLines = [];
+              
+              for (let i = jsonStartIndex; i < lines.length; i++) {
+                const line = lines[i];
+                jsonLines.push(line);
+                
+                for (const char of line) {
+                  if (char === '{') braceCount++;
+                  if (char === '}') braceCount--;
+                }
+                
+                if (braceCount === 0) {
+                  const jsonStr = jsonLines.join('\n').trim();
+                  try {
+                    const parsed = JSON.parse(jsonStr);
+                    if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                      jsonLine = jsonStr;
+                      break;
+                    }
+                  } catch (e) {
+                    // Не валидный JSON
+                  }
+                  break;
+                }
+              }
+            }
+          }
+          
+          if (!jsonLine) {
+            throw new Error('No valid JSON response from queues-api.ts');
+          }
+          
+          const result = JSON.parse(jsonLine);
+          const statusCode = result.success ? (req.method === 'POST' ? 201 : 200) : (result.error?.code === 'NOT_FOUND' ? 404 : 400);
+          
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(jsonLine);
+        } catch (error) {
+          console.error('[Queues API] Error:', error);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: error.message }
+          }));
+        }
+      });
+      return;
+    }
+    
+    // API для работы со сценариями через БД
+    console.log('[DEBUG] Scenarios API request:', req.method, pathname);
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    // Обработка GET запросов сразу (без body)
+    if (req.method === 'GET') {
+      (async () => {
+        try {
+          const url = new URL(req.url, `http://${req.headers.host}`);
+          const pathParts = pathname.split('/').filter(p => p);
+          let command = '';
+          let requestData = {};
+          
+          if (pathParts.length === 4 && pathParts[3] === 'executions') {
+            // GET /api/scenarios/:id/executions
+            command = 'executions';
+            requestData = {
+              scenarioId: pathParts[2],
+              executionStatus: url.searchParams.get('status'),
+              limit: url.searchParams.get('limit'),
+              offset: url.searchParams.get('offset'),
+            };
+          } else if (pathParts.length === 3) {
+            // GET /api/scenarios/:id
+            command = 'get';
+            requestData = { id: pathParts[2] };
+          } else {
+            // GET /api/scenarios
+            command = 'list';
+            requestData = {
+              status: url.searchParams.get('status'),
+              limit: url.searchParams.get('limit'),
+              offset: url.searchParams.get('offset'),
+            };
+          }
+          
+          // Выполняем через tsx
+          const tempRequestFile = path.join(__dirname, `temp-scenarios-${Date.now()}.json`);
+          fs.writeFileSync(tempRequestFile, JSON.stringify(requestData), 'utf-8');
+          
+          const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+          const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+          const scriptPath = path.join(__dirname, 'src', 'web', 'scenarios-api.ts');
+          
+          // Проверяем существование скрипта
+          if (!fs.existsSync(scriptPath)) {
+            throw new Error(`Script not found: ${scriptPath}`);
+          }
+          
+          console.log(`[Scenarios API] Executing: ${command} with data:`, JSON.stringify(requestData));
+          
+          let stdout, stderr;
+          try {
+            const execResult = await execAsync(
+              `${tsxCmd} "${scriptPath}" "${command}" "${tempRequestFile}"`,
+              { cwd: __dirname, maxBuffer: 10 * 1024 * 1024, timeout: 30000 }
+            );
+            stdout = execResult.stdout;
+            stderr = execResult.stderr;
+          } catch (execError) {
+            // Если команда завершилась с ошибкой, но есть stdout, используем его
+            stdout = execError.stdout || '';
+            stderr = execError.stderr || '';
+            
+            // Если в stderr есть полезная информация, логируем
+            if (stderr && !stderr.includes('PrismaClientConstructorValidationError')) {
+              console.log(`[Scenarios API] stderr:`, stderr.substring(0, 500));
+            }
+          }
+          
+          // Удаляем временный файл
+          try {
+            fs.unlinkSync(tempRequestFile);
+          } catch (e) {
+            // Игнорируем ошибки удаления
+          }
+          
+          // Парсим результат
+          if (!stdout || stdout.trim().length === 0) {
+            throw new Error('Empty response from scenarios-api.ts');
+          }
+          
+        // Улучшенный парсинг JSON: обрабатываем многострочный JSON и фильтруем PowerShell сообщения
+        const lines = stdout.trim().split('\n').filter(line => line.trim());
+        let jsonLine = null;
+        
+        // Сначала пробуем найти JSON в одной строке
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          
+          // Пропускаем пустые строки
+          if (!line) continue;
+          
+          // Пропускаем строки с логами и служебными сообщениями PowerShell
+          if (line.startsWith('[LOG]') || line.startsWith('[WARN]') || line.startsWith('[ERROR]') || line.startsWith('[INFO]') || 
+              line.includes('prisma:query') || line.includes('prisma:') || 
+              line.startsWith('node.exe') || line.startsWith('node ') ||
+              line.startsWith('At line:') || line.startsWith('+ CategoryInfo:') ||
+              line.includes('RemoteException') || line.includes('NativeCommandError') ||
+              line.startsWith('& "') || line.startsWith('C:\\Program Files') ||
+              line.startsWith('At C:') || line.startsWith('At ') ||
+              line.includes('CategoryInfo') || line.includes('FullyQualifiedErrorId') ||
+              line.startsWith('[path]') || line.includes('"[path]"') ||
+              /^\s*\+.*CategoryInfo/.test(line) || /^\s*\+.*FullyQualifiedErrorId/.test(line) ||
+              line.startsWith('tsx.cmd')) {
+            continue;
+          }
+          
+          // Проверяем, что это валидный JSON (начинается с { и заканчивается })
+          if (line.startsWith('{') && line.endsWith('}')) {
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                jsonLine = line;
+                break;
+              }
+            } catch (e) {
+              // Не валидный JSON в одной строке, продолжаем
+              continue;
+            }
+          }
+        }
+        
+        // Если не нашли в одной строке, пробуем собрать многострочный JSON
+        if (!jsonLine) {
+          // Ищем строку, начинающуюся с {
+          let jsonStartIndex = -1;
+          for (let i = 0; i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+            if (trimmed.startsWith('{') && 
+                !trimmed.startsWith('[LOG]') && !trimmed.startsWith('[WARN]') &&
+                !trimmed.startsWith('[ERROR]') && !trimmed.startsWith('[INFO]') &&
+                !trimmed.includes('prisma:query') && !trimmed.includes('prisma:') &&
+                !trimmed.startsWith('node.exe') && !trimmed.startsWith('node ') &&
+                !trimmed.startsWith('At line:') && !trimmed.startsWith('+ CategoryInfo:') &&
+                !trimmed.includes('RemoteException') && !trimmed.includes('NativeCommandError') &&
+                !trimmed.startsWith('& "') && !trimmed.startsWith('C:\\Program Files') &&
+                !trimmed.startsWith('At C:') && !trimmed.startsWith('At ') &&
+                !trimmed.includes('CategoryInfo') && !trimmed.includes('FullyQualifiedErrorId') &&
+                !trimmed.startsWith('[path]') && !trimmed.includes('"[path]"') &&
+                !/^\s*\+.*CategoryInfo/.test(trimmed) && !/^\s*\+.*FullyQualifiedErrorId/.test(trimmed) &&
+                !trimmed.startsWith('tsx.cmd')) {
+              jsonStartIndex = i;
+              break;
+            }
+          }
+          
+          if (jsonStartIndex !== -1) {
+            // Собираем JSON из строк, начиная с найденной
+            let braceCount = 0;
+            let jsonLines = [];
+            
+            for (let i = jsonStartIndex; i < lines.length; i++) {
+              const line = lines[i];
+              jsonLines.push(line);
+              
+              // Подсчитываем скобки
+              for (const char of line) {
+                if (char === '{') braceCount++;
+                if (char === '}') braceCount--;
+              }
+              
+              // Если скобки сбалансированы, JSON собран
+              if (braceCount === 0) {
+                const jsonStr = jsonLines.join('\n').trim();
+                try {
+                  const parsed = JSON.parse(jsonStr);
+                  if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                    jsonLine = jsonStr;
+                    break;
+                  }
+                } catch (e) {
+                  // Не валидный JSON
+                }
+                break;
+              }
+            }
+          }
+        }
+          
+          if (!jsonLine) {
+            console.error('[Scenarios API] No JSON found in output.');
+            console.error('[Scenarios API] First 500 chars of stdout:', stdout.substring(0, 500));
+            console.error('[Scenarios API] All lines:', lines);
+            
+            // Очищаем путь к файлу из сообщения об ошибке
+            let errorOutput = stdout.substring(0, 500);
+            // Фильтруем строки PowerShell перед выводом ошибки
+            const filteredLines = lines.filter(line => {
+              const lineTrimmed = line.trim();
+              return !(lineTrimmed.startsWith('[LOG]') || lineTrimmed.startsWith('[WARN]') || lineTrimmed.startsWith('[ERROR]') || lineTrimmed.startsWith('[INFO]') || 
+                       lineTrimmed.includes('prisma:query') || lineTrimmed.includes('prisma:') ||
+                       lineTrimmed.startsWith('node.exe') || lineTrimmed.startsWith('node ') ||
+                       lineTrimmed.startsWith('At line:') || lineTrimmed.startsWith('+ CategoryInfo:') ||
+                       lineTrimmed.includes('RemoteException') || lineTrimmed.includes('NativeCommandError') ||
+                       lineTrimmed.startsWith('& "') || lineTrimmed.startsWith('C:\\Program Files') ||
+                       lineTrimmed.startsWith('At C:') || lineTrimmed.includes('CategoryInfo') ||
+                       lineTrimmed.includes('FullyQualifiedErrorId'));
+            });
+            // Ищем любую строку, которая выглядит как JSON
+            // Исключаем строки с "[path]" в содержимом
+            const jsonCandidates = filteredLines.filter(line => {
+              const trimmed = line.trim();
+              return trimmed.startsWith('{') && trimmed.endsWith('}') && !trimmed.includes('"[path]"');
+            });
+            
+            if (jsonCandidates.length > 0) {
+              // Пробуем распарсить первый кандидат
+              try {
+                const candidate = jsonCandidates[0].trim();
+                const parsed = JSON.parse(candidate);
+                if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                  jsonLine = candidate;
+                }
+              } catch (e) {
+                // Не валидный JSON, продолжаем
+              }
+            }
+            
+            if (!jsonLine) {
+              // Если все еще не нашли JSON, формируем сообщение об ошибке
+              // Фильтруем строки, которые содержат "[path]" или начинаются с него
+              const cleanLines = filteredLines.filter(l => {
+                const trimmed = l.trim();
+                return !trimmed.startsWith('[path]') && !trimmed.includes('"[path]"');
+              });
+              let errorOutput = cleanLines.length > 0 ? cleanLines.join('\n').substring(0, 200) : 'No valid JSON found';
+              // Убираем пути к файлам из сообщения об ошибке
+              errorOutput = errorOutput.replace(/[A-Z]:\\[^\s"]+/g, '[path]');
+              errorOutput = errorOutput.replace(/\/[^\s"]+/g, '[path]');
+              throw new Error('No valid JSON response from scenarios-api.ts. Output: ' + errorOutput);
+            }
+          }
+          
+          // Парсим JSON
+          let result;
+          try {
+            result = JSON.parse(jsonLine);
+          } catch (parseError) {
+            console.error('[Scenarios API] JSON parse error:', parseError.message);
+            console.error('[Scenarios API] Attempted to parse:', jsonLine.substring(0, 200));
+            throw new Error('Invalid JSON in response: ' + parseError.message);
+          }
+          
+          const statusCode = result.success ? 200 : (result.error?.code === 'NOT_FOUND' ? 404 : 400);
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (error) {
+          console.error('Error in /api/scenarios (GET):', error);
+          console.error('Error message:', error.message);
+          console.error('Error stack:', error.stack);
+          
+          // Очищаем сообщение об ошибке от путей к файлам
+          let errorMessage = error.message || 'Unknown error';
+          errorMessage = errorMessage.replace(/[A-Z]:\\[^\s"]+/g, '[path]');
+          errorMessage = errorMessage.replace(/\/[^\s"]+/g, '[path]');
+          if (errorMessage.length > 500) {
+            errorMessage = errorMessage.substring(0, 500) + '...';
+          }
+          
+          // Убеждаемся, что возвращаем валидный JSON
+          const errorResponse = {
+            success: false,
+            error: {
+              code: 'INTERNAL_ERROR',
+              message: errorMessage
+            }
+          };
+          
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(errorResponse));
+        }
+      })();
+      return; // Важно: возвращаемся, чтобы не обрабатывать дальше
+    }
+    
+    // Обработка POST, PUT, DELETE запросов (с body)
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', async () => {
+      try {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const pathParts = pathname.split('/').filter(p => p);
+        let command = '';
+        let requestData = {};
+        
+        if (req.method === 'POST') {
+          // POST /api/scenarios
+          command = 'create';
+          requestData = body ? JSON.parse(body) : {};
+        } else if (req.method === 'PUT') {
+          // PUT /api/scenarios/:id
+          command = 'update';
+          requestData = {
+            id: pathParts[2],
+            ...(body ? JSON.parse(body) : {})
+          };
+        } else if (req.method === 'DELETE') {
+          // DELETE /api/scenarios/:id
+          command = 'delete';
+          requestData = { id: pathParts[2] };
+        }
+        
+        if (!command) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: { code: 'INVALID_METHOD', message: 'Method not supported' }
+          }));
+          return;
+        }
+        
+        // Выполняем через tsx
+        const tempRequestFile = path.join(__dirname, `temp-scenarios-${Date.now()}.json`);
+        fs.writeFileSync(tempRequestFile, JSON.stringify(requestData), 'utf-8');
+        
+        const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+        const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+        const scriptPath = path.join(__dirname, 'src', 'web', 'scenarios-api.ts');
+        
+        // Проверяем существование скрипта
+        if (!fs.existsSync(scriptPath)) {
+          throw new Error(`Script not found: ${scriptPath}`);
+        }
+        
+        console.log(`[Scenarios API] Executing: ${command} with data:`, JSON.stringify(requestData));
+        
+        let stdout, stderr;
+        try {
+          // Используем файл для передачи данных, чтобы избежать проблем с экранированием в PowerShell
+          const execResult = await execAsync(
+            `${tsxCmd} "${scriptPath}" "${command}" "${tempRequestFile}"`,
+            { 
+              cwd: __dirname, 
+              maxBuffer: 10 * 1024 * 1024, 
+              timeout: 30000,
+              shell: false  // Не используем shell, чтобы избежать проблем с экранированием
+            }
+          );
+          stdout = execResult.stdout;
+          stderr = execResult.stderr;
+        } catch (execError) {
+          // Если команда завершилась с ошибкой, но есть stdout, используем его
+          stdout = execError.stdout || '';
+          stderr = execError.stderr || '';
+          
+          // Если в stderr есть полезная информация, логируем
+          if (stderr && !stderr.includes('PrismaClientConstructorValidationError')) {
+            console.log(`[Scenarios API] stderr:`, stderr.substring(0, 500));
+          }
+        }
+        
+        // Удаляем временный файл
+        try {
+          fs.unlinkSync(tempRequestFile);
+        } catch (e) {
+          // Игнорируем ошибки удаления
+        }
+        
+        // Парсим результат
+        if (!stdout || stdout.trim().length === 0) {
+          throw new Error('Empty response from scenarios-api.ts');
+        }
+        
+        // Улучшенный парсинг JSON: обрабатываем многострочный JSON и фильтруем PowerShell сообщения
+        const lines = stdout.trim().split('\n').filter(line => line.trim());
+        let jsonLine = null;
+        
+        // Сначала пробуем найти JSON в одной строке
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          
+          // Пропускаем пустые строки
+          if (!line) continue;
+          
+          // Пропускаем строки с логами и служебными сообщениями PowerShell
+          if (line.startsWith('[LOG]') || line.startsWith('[WARN]') || line.startsWith('[ERROR]') || line.startsWith('[INFO]') || 
+              line.includes('prisma:query') || line.includes('prisma:') || 
+              line.startsWith('node.exe') || line.startsWith('node ') ||
+              line.startsWith('At line:') || line.startsWith('+ CategoryInfo:') ||
+              line.includes('RemoteException') || line.includes('NativeCommandError') ||
+              line.startsWith('& "') || line.startsWith('C:\\Program Files') ||
+              line.startsWith('At C:') || line.startsWith('At ') ||
+              line.includes('CategoryInfo') || line.includes('FullyQualifiedErrorId') ||
+              line.startsWith('[path]') || line.includes('"[path]"') ||
+              /^\s*\+.*CategoryInfo/.test(line) || /^\s*\+.*FullyQualifiedErrorId/.test(line) ||
+              line.startsWith('tsx.cmd')) {
+            continue;
+          }
+          
+          // Проверяем, что это валидный JSON (начинается с { и заканчивается })
+          if (line.startsWith('{') && line.endsWith('}')) {
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                jsonLine = line;
+                break;
+              }
+            } catch (e) {
+              // Не валидный JSON в одной строке, продолжаем
+              continue;
+            }
+          }
+        }
+        
+        // Если не нашли в одной строке, пробуем собрать многострочный JSON
+        if (!jsonLine) {
+          // Ищем строку, начинающуюся с {
+          let jsonStartIndex = -1;
+          for (let i = 0; i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+            if (trimmed.startsWith('{') && 
+                !trimmed.startsWith('[LOG]') && !trimmed.startsWith('[WARN]') &&
+                !trimmed.startsWith('[ERROR]') && !trimmed.startsWith('[INFO]') &&
+                !trimmed.includes('prisma:query') && !trimmed.includes('prisma:') &&
+                !trimmed.startsWith('node.exe') && !trimmed.startsWith('node ') &&
+                !trimmed.startsWith('At line:') && !trimmed.startsWith('+ CategoryInfo:') &&
+                !trimmed.includes('RemoteException') && !trimmed.includes('NativeCommandError') &&
+                !trimmed.startsWith('& "') && !trimmed.startsWith('C:\\Program Files') &&
+                !trimmed.startsWith('At C:') && !trimmed.startsWith('At ') &&
+                !trimmed.includes('CategoryInfo') && !trimmed.includes('FullyQualifiedErrorId') &&
+                !trimmed.startsWith('[path]') && !trimmed.includes('"[path]"') &&
+                !/^\s*\+.*CategoryInfo/.test(trimmed) && !/^\s*\+.*FullyQualifiedErrorId/.test(trimmed) &&
+                !trimmed.startsWith('tsx.cmd')) {
+              jsonStartIndex = i;
+              break;
+            }
+          }
+          
+          if (jsonStartIndex !== -1) {
+            // Собираем JSON из строк, начиная с найденной
+            let braceCount = 0;
+            let jsonLines = [];
+            
+            for (let i = jsonStartIndex; i < lines.length; i++) {
+              const line = lines[i];
+              jsonLines.push(line);
+              
+              // Подсчитываем скобки
+              for (const char of line) {
+                if (char === '{') braceCount++;
+                if (char === '}') braceCount--;
+              }
+              
+              // Если скобки сбалансированы, JSON собран
+              if (braceCount === 0) {
+                const jsonStr = jsonLines.join('\n').trim();
+                try {
+                  const parsed = JSON.parse(jsonStr);
+                  if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                    jsonLine = jsonStr;
+                    break;
+                  }
+                } catch (e) {
+                  // Не валидный JSON
+                }
+                break;
+              }
+            }
+          }
+        }
+        
+        // Если не нашли полную JSON строку, пробуем найти начало и собрать полную строку
+        if (!jsonLine) {
+          // Ищем строку, начинающуюся с {, но не логи
+          const startIndex = lines.findIndex(line => {
+            const lineTrimmed = line.trim();
+            return lineTrimmed.startsWith('{') && 
+                   !(lineTrimmed.startsWith('[LOG]') || lineTrimmed.startsWith('[WARN]') || lineTrimmed.startsWith('[ERROR]') || lineTrimmed.startsWith('[INFO]') || 
+                     lineTrimmed.includes('prisma:query') || lineTrimmed.includes('prisma:') ||
+                     lineTrimmed.startsWith('node.exe') || lineTrimmed.startsWith('node ') ||
+                     lineTrimmed.startsWith('At line:') || lineTrimmed.startsWith('+ CategoryInfo:') ||
+                     lineTrimmed.includes('RemoteException') || lineTrimmed.includes('NativeCommandError') ||
+                     lineTrimmed.startsWith('& "') || lineTrimmed.startsWith('C:\\Program Files') ||
+                     lineTrimmed.startsWith('At C:') || lineTrimmed.includes('CategoryInfo') ||
+                     lineTrimmed.includes('FullyQualifiedErrorId'));
+          });
+          if (startIndex !== -1) {
+            // Пробуем собрать JSON из нескольких строк
+            let potentialJsonLines = lines.slice(startIndex);
+            // Отфильтровываем логи из потенциальных JSON строк
+            potentialJsonLines = potentialJsonLines.filter(line => {
+              const lineTrimmed = line.trim();
+              return !(lineTrimmed.startsWith('[LOG]') || lineTrimmed.startsWith('[WARN]') || lineTrimmed.startsWith('[ERROR]') || lineTrimmed.startsWith('[INFO]') || 
+                       lineTrimmed.includes('prisma:query') || lineTrimmed.includes('prisma:') ||
+                       lineTrimmed.startsWith('node.exe') || lineTrimmed.startsWith('node ') ||
+                       lineTrimmed.startsWith('At line:') || lineTrimmed.startsWith('+ CategoryInfo:') ||
+                       lineTrimmed.includes('RemoteException') || lineTrimmed.includes('NativeCommandError') ||
+                       lineTrimmed.startsWith('& "') || lineTrimmed.startsWith('C:\\Program Files') ||
+                       lineTrimmed.startsWith('At C:') || lineTrimmed.includes('CategoryInfo') ||
+                       lineTrimmed.includes('FullyQualifiedErrorId'));
+            });
+            
+            let potentialJson = potentialJsonLines.join('\n').trim();
+            
+            // Если JSON разбит на несколько строк, пробуем найти конец
+            // Ищем последнюю закрывающую скобку
+            let braceCount = 0;
+            let jsonEnd = -1;
+            for (let i = 0; i < potentialJson.length; i++) {
+              if (potentialJson[i] === '{') braceCount++;
+              if (potentialJson[i] === '}') {
+                braceCount--;
+                if (braceCount === 0) {
+                  jsonEnd = i + 1;
+                  break;
+                }
+              }
+            }
+            
+            if (jsonEnd > 0) {
+              potentialJson = potentialJson.substring(0, jsonEnd);
+              try {
+                const parsed = JSON.parse(potentialJson);
+                if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                  jsonLine = potentialJson;
+                }
+              } catch (e) {
+                // Не валидный JSON
+              }
+            }
+          }
+        }
+        
+          if (!jsonLine) {
+            console.error('[Scenarios API] No JSON found in output.');
+            console.error('[Scenarios API] First 500 chars of stdout:', stdout.substring(0, 500));
+            console.error('[Scenarios API] All lines:', lines);
+            
+            // Фильтруем строки PowerShell перед выводом ошибки
+            const filteredLines = lines.filter(line => {
+              const lineTrimmed = line.trim();
+              return !(lineTrimmed.startsWith('[LOG]') || lineTrimmed.startsWith('[WARN]') || lineTrimmed.startsWith('[ERROR]') || lineTrimmed.startsWith('[INFO]') || 
+                       lineTrimmed.includes('prisma:query') || lineTrimmed.includes('prisma:') ||
+                       lineTrimmed.startsWith('node.exe') || lineTrimmed.startsWith('node ') ||
+                       lineTrimmed.startsWith('At line:') || lineTrimmed.startsWith('+ CategoryInfo:') ||
+                       lineTrimmed.includes('RemoteException') || lineTrimmed.includes('NativeCommandError') ||
+                       lineTrimmed.startsWith('& "') || lineTrimmed.startsWith('C:\\Program Files') ||
+                       lineTrimmed.startsWith('At C:') || lineTrimmed.startsWith('At ') ||
+                       lineTrimmed.includes('CategoryInfo') || lineTrimmed.includes('FullyQualifiedErrorId') ||
+                       lineTrimmed.startsWith('[path]') || lineTrimmed.includes('"[path]"'));
+            });
+            
+            // Ищем любую строку, которая выглядит как JSON (начинается с { и заканчивается })
+            // Исключаем строки с "[path]" в содержимом
+            const jsonCandidates = filteredLines.filter(line => {
+              const trimmed = line.trim();
+              return trimmed.startsWith('{') && trimmed.endsWith('}') && !trimmed.includes('"[path]"');
+            });
+            
+            if (jsonCandidates.length > 0) {
+              // Пробуем распарсить первый кандидат
+              try {
+                const candidate = jsonCandidates[0].trim();
+                const parsed = JSON.parse(candidate);
+                if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                  jsonLine = candidate;
+                }
+              } catch (e) {
+                // Не валидный JSON, продолжаем
+              }
+            }
+            
+            if (!jsonLine) {
+              // Если все еще не нашли JSON, формируем сообщение об ошибке
+              // Фильтруем строки, которые содержат "[path]" или начинаются с него
+              const cleanLines = filteredLines.filter(l => {
+                const trimmed = l.trim();
+                return !trimmed.startsWith('[path]') && !trimmed.includes('"[path]"');
+              });
+              let errorOutput = cleanLines.length > 0 ? cleanLines.join('\n').substring(0, 200) : 'No valid JSON found';
+              // Убираем пути к файлам из сообщения об ошибке
+              errorOutput = errorOutput.replace(/[A-Z]:\\[^\s"]+/g, '[path]');
+              errorOutput = errorOutput.replace(/\/[^\s"]+/g, '[path]');
+              throw new Error('No valid JSON response from scenarios-api.ts. Output: ' + errorOutput);
+            }
+          }
+        
+        // Парсим JSON
+        let result;
+        try {
+          result = JSON.parse(jsonLine);
+        } catch (parseError) {
+          console.error('[Scenarios API] JSON parse error:', parseError.message);
+          console.error('[Scenarios API] Attempted to parse:', jsonLine.substring(0, 200));
+          throw new Error('Invalid JSON in response: ' + parseError.message);
+        }
+        
+        const statusCode = result.success ? 200 : (result.error?.code === 'NOT_FOUND' ? 404 : 400);
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        console.error('Error in /api/scenarios (POST/PUT/DELETE):', error);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        
+        // Очищаем сообщение об ошибке от путей к файлам
+        let errorMessage = error.message || 'Unknown error';
+        errorMessage = errorMessage.replace(/[A-Z]:\\[^\s"]+/g, '[path]');
+        errorMessage = errorMessage.replace(/\/[^\s"]+/g, '[path]');
+        if (errorMessage.length > 500) {
+          errorMessage = errorMessage.substring(0, 500) + '...';
+        }
+        
+        // Убеждаемся, что возвращаем валидный JSON
+        const errorResponse = {
+          success: false,
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: errorMessage
+          }
+        };
+        
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(errorResponse));
+      }
+    });
+  } else if (pathname.startsWith('/api/executions')) {
+    // API для работы с выполнениями
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', async () => {
+      try {
+        const pathParts = pathname.split('/').filter(p => p);
+        let command = '';
+        let requestData = {};
+        
+        if (req.method === 'GET') {
+          if (pathParts.length === 4 && pathParts[3] === 'events') {
+            // GET /api/executions/:executionId/events
+            command = 'execution-events';
+            requestData = { executionId: pathParts[2] };
+          } else if (pathParts.length === 3) {
+            // GET /api/executions/:executionId
+            command = 'execution';
+            requestData = { executionId: pathParts[2] };
+          }
+        }
+        
+        if (!command) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: { code: 'INVALID_REQUEST', message: 'Invalid endpoint' }
+          }));
+          return;
+        }
+        
+        // Выполняем через tsx
+        const tempRequestFile = path.join(__dirname, `temp-executions-${Date.now()}.json`);
+        fs.writeFileSync(tempRequestFile, JSON.stringify(requestData), 'utf-8');
+        
+        const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+        const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+        const scriptPath = path.join(__dirname, 'src', 'web', 'scenarios-api.ts');
+        
+        const { stdout, stderr } = await execAsync(
+          `${tsxCmd} "${scriptPath}" "${command}" "${tempRequestFile}"`,
+          { cwd: __dirname, maxBuffer: 10 * 1024 * 1024, timeout: 30000 }
+        );
+        
+        // Удаляем временный файл
+        try {
+          fs.unlinkSync(tempRequestFile);
+        } catch (e) {
+          // Игнорируем ошибки удаления
+        }
+        
+        // Парсим результат
+        const lines = stdout.trim().split('\n').filter(line => line.trim());
+        const jsonLine = lines[lines.length - 1];
+        const result = JSON.parse(jsonLine);
+        
+        const statusCode = result.success ? 200 : (result.error?.code === 'NOT_FOUND' ? 404 : 400);
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        console.error('Error in /api/executions:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: error.message || 'Unknown error'
+          }
+        }));
+      }
+    });
   } else if (pathname === '/api/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -830,6 +1934,18 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log('   http://localhost:' + PORT + '/test-orchestrator.html');
   console.log('   http://localhost:' + PORT + '/test-event-bus.html');
   console.log('   http://localhost:' + PORT + '/observability-dashboard.html');
+  console.log('');
+  console.log('📡 API Endpoints:');
+  console.log('   GET  /api/scenarios - список сценариев');
+  console.log('   POST /api/scenarios - создать сценарий');
+  console.log('   GET  /api/scenarios/:id - получить сценарий');
+  console.log('   GET  /api/executions/:id - получить выполнение');
+  console.log('   GET  /api/queues - список очередей');
+  console.log('   POST /api/queues - создать очередь');
+  console.log('   GET  /api/queues/:id - получить очередь');
+  console.log('   POST /api/queues/:id/triggers - добавить триггер');
+  console.log('   POST /api/queues/:id/jobs - добавить задание');
+  console.log('   См. API_DOCUMENTATION.md для полной документации');
   console.log('========================================');
   console.log('⏹️  Для остановки: Ctrl+C');
   console.log('========================================');
