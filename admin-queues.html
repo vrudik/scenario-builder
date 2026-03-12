@@ -278,10 +278,34 @@
                     </h2>
                     <p class="section-description">Управление очередями сценариев и триггерами событий</p>
                 </div>
-                <button class="action-btn" onclick="openCreateQueueModal()">
-                    <span>+</span>
-                    <span>Create Queue</span>
-                </button>
+                <div style="display: flex; gap: 12px;">
+                    <button class="action-btn secondary" onclick="toggleProcessor()" id="processorToggleBtn">
+                        <span id="processorStatusIcon">⏸️</span>
+                        <span id="processorStatusText">Processor Stopped</span>
+                    </button>
+                    <button class="action-btn" onclick="openCreateQueueModal()">
+                        <span>+</span>
+                        <span>Create Queue</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Queue Processor Status -->
+            <div class="section-card" style="margin-bottom: 20px; padding: 16px; background: var(--bg-secondary);">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">Queue Processor</h3>
+                        <div style="display: flex; gap: 16px; font-size: 0.9em; color: var(--text-secondary);">
+                            <span>Status: <strong id="processorStatus">Checking...</strong></span>
+                            <span>Active Jobs: <strong id="activeJobsCount">-</strong></span>
+                            <span>Max Concurrency: <strong id="maxConcurrency">-</strong></span>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-sm" onclick="refreshProcessorStatus()">🔄 Refresh</button>
+                        <button class="btn btn-sm btn-secondary" onclick="refreshSubscriptions()">🔄 Refresh Subscriptions</button>
+                    </div>
+                </div>
             </div>
 
             <div class="filters">
@@ -389,6 +413,16 @@
                     </div>
 
                     <div class="form-group">
+                        <label for="triggerScenarioId">Scenario (optional)</label>
+                        <select id="triggerScenarioId">
+                            <option value="">No scenario (manual job creation only)</option>
+                        </select>
+                        <small style="color: var(--text-secondary); display: block; margin-top: 4px;">
+                            If selected, jobs will be automatically created when events match this trigger
+                        </small>
+                    </div>
+
+                    <div class="form-group">
                         <label for="triggerFilter">Filter (JSON, optional)</label>
                         <textarea id="triggerFilter" rows="4" placeholder='{"userId": "123"}'></textarea>
                     </div>
@@ -441,6 +475,110 @@
     <script>
         let currentQueueId = null;
         let scenarios = [];
+        let processorRunning = false;
+
+        // Загрузка сценариев
+        async function loadScenarios() {
+            try {
+                const response = await fetch('/api/scenarios');
+                const data = await response.json();
+                if (data.success) {
+                    scenarios = data.scenarios || [];
+                    populateScenarioSelects();
+                }
+            } catch (error) {
+                console.error('Error loading scenarios:', error);
+            }
+        }
+
+        function populateScenarioSelects() {
+            const jobSelect = document.getElementById('jobScenarioId');
+            const triggerSelect = document.getElementById('triggerScenarioId');
+            
+            if (jobSelect) {
+                jobSelect.innerHTML = '<option value="">Select scenario...</option>' +
+                    scenarios.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+            }
+            
+            if (triggerSelect) {
+                triggerSelect.innerHTML = '<option value="">No scenario (manual job creation only)</option>' +
+                    scenarios.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+            }
+        }
+
+        // Управление процессором очередей
+        async function refreshProcessorStatus() {
+            try {
+                const response = await fetch('/api/queue-processor/status');
+                const data = await response.json();
+                
+                if (data.success && data.stats) {
+                    processorRunning = data.stats.isRunning;
+                    document.getElementById('processorStatus').textContent = 
+                        data.stats.isRunning ? 'Running' : 'Stopped';
+                    document.getElementById('activeJobsCount').textContent = data.stats.activeJobs || 0;
+                    document.getElementById('maxConcurrency').textContent = data.stats.maxConcurrency || 0;
+                    
+                    const btn = document.getElementById('processorToggleBtn');
+                    const icon = document.getElementById('processorStatusIcon');
+                    const text = document.getElementById('processorStatusText');
+                    
+                    if (data.stats.isRunning) {
+                        icon.textContent = '▶️';
+                        text.textContent = 'Stop Processor';
+                        btn.classList.remove('secondary');
+                        btn.classList.add('danger');
+                    } else {
+                        icon.textContent = '⏸️';
+                        text.textContent = 'Start Processor';
+                        btn.classList.remove('danger');
+                        btn.classList.add('secondary');
+                    }
+                }
+            } catch (error) {
+                console.error('Error refreshing processor status:', error);
+                document.getElementById('processorStatus').textContent = 'Error';
+            }
+        }
+
+        async function toggleProcessor() {
+            try {
+                const action = processorRunning ? 'stop' : 'start';
+                const response = await fetch(`/api/queue-processor/${action}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                
+                const data = await response.json();
+                
+                if (!data.success) {
+                    throw new Error(data.error?.message || 'Error toggling processor');
+                }
+                
+                await refreshProcessorStatus();
+            } catch (error) {
+                alert('Error toggling processor: ' + error.message);
+            }
+        }
+
+        async function refreshSubscriptions() {
+            try {
+                const response = await fetch('/api/queue-processor/refresh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                
+                const data = await response.json();
+                
+                if (!data.success) {
+                    throw new Error(data.error?.message || 'Error refreshing subscriptions');
+                }
+                
+                alert('Subscriptions refreshed successfully');
+            } catch (error) {
+                alert('Error refreshing subscriptions: ' + error.message);
+            }
+        }
 
         // Загрузка очередей
         async function loadQueues() {
@@ -680,9 +818,11 @@
                 }
             }
             
+            const scenarioId = document.getElementById('triggerScenarioId').value;
             const data = {
                 eventType: document.getElementById('triggerEventType').value,
                 topic: document.getElementById('triggerTopic').value,
+                scenarioId: scenarioId || null,
                 filter,
             };
             
@@ -817,7 +957,12 @@
         };
 
         // Загрузка при старте
+        loadScenarios();
         loadQueues();
+        refreshProcessorStatus();
+        
+        // Автообновление статуса процессора каждые 5 секунд
+        setInterval(refreshProcessorStatus, 5000);
     </script>
 </body>
 </html>

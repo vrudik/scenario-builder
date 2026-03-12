@@ -221,14 +221,73 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Отладка: логируем запросы к admin-страницам
-  if (pathname.startsWith('/admin-')) {
-    console.log('[DEBUG] Admin page request:', pathname);
+  if (pathname.startsWith('/admin')) {
+    console.log('[DEBUG] Admin request:', pathname);
   }
 
+  // Главная страница: видимая точка входа в админку
   if (pathname === '/' || pathname === '/index.html') {
+    const entryHtml = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scenario Builder</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      color: #fff;
+    }
+    h1 { font-size: 1.75rem; margin-bottom: 8px; font-weight: 600; }
+    p { color: rgba(255,255,255,0.85); margin-bottom: 32px; font-size: 1rem; }
+    a {
+      display: inline-block;
+      padding: 16px 32px;
+      background: #3b82f6;
+      color: white;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 1.1rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 14px rgba(59,130,246,0.4);
+      transition: background .2s, transform .1s;
+    }
+    a:hover { background: #2563eb; transform: translateY(-1px); }
+  </style>
+</head>
+<body>
+  <h1>Конструктор сценариев</h1>
+  <p>Платформа автономных сценариев и агентных процессов</p>
+  <a href="/admin-dashboard.html">Админский интерфейс</a>
+</body>
+</html>`;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(entryHtml);
+    return;
+  }
+
+  // /admin и /admin/ — редирект в дашборд
+  if (pathname === '/admin' || pathname === '/admin/') {
+    res.writeHead(302, { Location: '/admin-dashboard.html' });
+    res.end();
+    return;
+  }
+
+  if (pathname === '/legacy-dashboard') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(HTML);
-  } else if (pathname.startsWith('/admin-') && pathname.endsWith('.html')) {
+    return;
+  }
+
+  if (pathname.startsWith('/admin-') && pathname.endsWith('.html')) {
     // Отдача админ-страниц (сначала из web/admin/, затем из корня)
     try {
       const fileName = pathname.startsWith('/') ? pathname.substring(1) : pathname;
@@ -634,6 +693,526 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
             message: error.message || 'Unknown error'
           }
         }));
+      }
+    });
+  } else if (pathname.startsWith('/api/queue-processor')) {
+    // API для управления Queue Processor
+    console.log('[DEBUG] Queue Processor API request:', req.method, pathname);
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const pathParts = pathname.split('/').filter(p => p);
+    let command = '';
+    
+    if (pathParts.length === 3) {
+      // POST /api/queue-processor/start
+      // POST /api/queue-processor/stop
+      // GET /api/queue-processor/status
+      // POST /api/queue-processor/refresh
+      command = pathParts[2];
+    } else {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: { code: 'INVALID_PATH', message: 'Invalid path' }
+      }));
+      return;
+    }
+    
+    if (req.method === 'GET' && command === 'status') {
+      // GET /api/queue-processor/status
+      (async () => {
+        try {
+          const tempRequestFile = path.join(__dirname, `temp-processor-${Date.now()}.json`);
+          fs.writeFileSync(tempRequestFile, JSON.stringify({}), 'utf-8');
+          
+          const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+          const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+          const scriptPath = path.join(__dirname, 'src', 'web', 'queue-processor-api.ts');
+          
+          const { stdout, stderr } = await execAsync(
+            `${tsxCmd} "${scriptPath}" "${command}" "${tempRequestFile}"`,
+            { cwd: __dirname, maxBuffer: 10 * 1024 * 1024 }
+          );
+          
+          try {
+            fs.unlinkSync(tempRequestFile);
+          } catch (e) {}
+          
+          // Парсим результат (фильтруем PowerShell логи)
+          const lines = stdout.trim().split('\n').filter(line => {
+            const trimmed = line.trim();
+            return trimmed && 
+                   !trimmed.startsWith('[LOG]') && 
+                   !trimmed.startsWith('[WARN]') && 
+                   !trimmed.startsWith('[ERROR]') &&
+                   !trimmed.includes('prisma:query') &&
+                   !trimmed.includes('node.exe') &&
+                   !trimmed.includes('At line:') &&
+                   !trimmed.includes('CategoryInfo:') &&
+                   !trimmed.includes('RemoteException') &&
+                   !trimmed.includes('NativeCommandError') &&
+                   !trimmed.startsWith('[path]') &&
+                   !trimmed.includes('tsx.cmd');
+          });
+          
+          let jsonResult = null;
+          
+          // Ищем JSON с начала
+          for (const line of lines) {
+            if (line.trim().startsWith('{')) {
+              try {
+                jsonResult = JSON.parse(line);
+                if (jsonResult.success !== undefined) {
+                  break;
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+          }
+          
+          // Если не нашли с начала, пробуем собрать многострочный JSON
+          if (!jsonResult) {
+            const jsonLines = lines.filter(l => l.trim().startsWith('{') || l.trim().startsWith('}') || l.trim().includes(':'));
+            if (jsonLines.length > 0) {
+              try {
+                const jsonStr = jsonLines.join('\n');
+                const firstBrace = jsonStr.indexOf('{');
+                const lastBrace = jsonStr.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                  jsonResult = JSON.parse(jsonStr.substring(firstBrace, lastBrace + 1));
+                }
+              } catch (e) {
+                // Игнорируем ошибки парсинга
+              }
+            }
+          }
+          
+          if (!jsonResult) {
+            throw new Error(`No valid JSON response from queue-processor-api.ts. Output: ${stdout.substring(0, 500)}`);
+          }
+          
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(jsonResult));
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: {
+              code: 'INTERNAL_ERROR',
+              message: error.message || 'Unknown error'
+            }
+          }));
+        }
+      })();
+    } else if (req.method === 'POST' && ['start', 'stop', 'refresh'].includes(command)) {
+      // POST /api/queue-processor/start
+      // POST /api/queue-processor/stop
+      // POST /api/queue-processor/refresh
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const requestData = body ? JSON.parse(body) : {};
+          const tempRequestFile = path.join(__dirname, `temp-processor-${Date.now()}.json`);
+          fs.writeFileSync(tempRequestFile, JSON.stringify(requestData), 'utf-8');
+          
+          const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+          const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+          const scriptPath = path.join(__dirname, 'src', 'web', 'queue-processor-api.ts');
+          
+          const { stdout, stderr } = await execAsync(
+            `${tsxCmd} "${scriptPath}" "${command}" "${tempRequestFile}"`,
+            { cwd: __dirname, maxBuffer: 10 * 1024 * 1024 }
+          );
+          
+          try {
+            fs.unlinkSync(tempRequestFile);
+          } catch (e) {}
+          
+          // Парсим результат (фильтруем PowerShell логи)
+          const lines = stdout.trim().split('\n').filter(line => {
+            const trimmed = line.trim();
+            return trimmed && 
+                   !trimmed.startsWith('[LOG]') && 
+                   !trimmed.startsWith('[WARN]') && 
+                   !trimmed.startsWith('[ERROR]') &&
+                   !trimmed.includes('prisma:query') &&
+                   !trimmed.includes('node.exe') &&
+                   !trimmed.includes('At line:') &&
+                   !trimmed.includes('CategoryInfo:') &&
+                   !trimmed.includes('RemoteException') &&
+                   !trimmed.includes('NativeCommandError') &&
+                   !trimmed.startsWith('[path]') &&
+                   !trimmed.includes('tsx.cmd');
+          });
+          
+          let jsonResult = null;
+          
+          // Ищем JSON с начала
+          for (const line of lines) {
+            if (line.trim().startsWith('{')) {
+              try {
+                jsonResult = JSON.parse(line);
+                if (jsonResult.success !== undefined) {
+                  break;
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+          }
+          
+          // Если не нашли с начала, пробуем собрать многострочный JSON
+          if (!jsonResult) {
+            const jsonLines = lines.filter(l => l.trim().startsWith('{') || l.trim().startsWith('}') || l.trim().includes(':'));
+            if (jsonLines.length > 0) {
+              try {
+                const jsonStr = jsonLines.join('\n');
+                const firstBrace = jsonStr.indexOf('{');
+                const lastBrace = jsonStr.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                  jsonResult = JSON.parse(jsonStr.substring(firstBrace, lastBrace + 1));
+                }
+              } catch (e) {
+                // Игнорируем ошибки парсинга
+              }
+            }
+          }
+          
+          if (!jsonResult) {
+            throw new Error(`No valid JSON response from queue-processor-api.ts. Output: ${stdout.substring(0, 500)}`);
+          }
+          
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(jsonResult));
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: {
+              code: 'INTERNAL_ERROR',
+              message: error.message || 'Unknown error'
+            }
+          }));
+        }
+      });
+    } else {
+      res.writeHead(405, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed' }
+      }));
+    }
+  } else if (pathname.startsWith('/api/eval')) {
+    // API для работы с eval-кейсами
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    // Обработка GET запросов сразу (без body)
+    if (req.method === 'GET') {
+      (async () => {
+        try {
+          const url = new URL(req.url, `http://${req.headers.host}`);
+          const pathParts = pathname.split('/').filter(p => p);
+          let command = '';
+          let requestData = {};
+
+          if (pathParts.length === 4 && pathParts[2] === 'cases') {
+            // GET /api/eval/cases/:id
+            command = 'get-case';
+            requestData = { caseId: pathParts[3] };
+          } else if (pathParts.length === 3 && pathParts[2] === 'search') {
+            // GET /api/eval/search
+            command = 'search-cases';
+            requestData = {
+              category: url.searchParams.get('category') || undefined,
+              severity: url.searchParams.get('severity') || undefined,
+              tags: url.searchParams.get('tags') ? url.searchParams.get('tags').split(',') : undefined,
+              name: url.searchParams.get('name') || undefined,
+            };
+          } else if (pathParts.length === 3 && pathParts[2] === 'cases') {
+            // GET /api/eval/cases
+            command = 'list-cases';
+            requestData = {};
+          } else {
+            // GET /api/eval (fallback to list)
+            command = 'list-cases';
+            requestData = {};
+          }
+
+          const tempRequestFile = path.join(__dirname, `temp-eval-${Date.now()}.json`);
+          fs.writeFileSync(tempRequestFile, JSON.stringify(requestData), 'utf-8');
+
+          const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+          const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+          const scriptPath = path.join(__dirname, 'src', 'web', 'eval-api.ts');
+
+          const { stdout, stderr } = await execAsync(
+            `${tsxCmd} "${scriptPath}" "${command}" "${tempRequestFile}"`,
+            { cwd: __dirname, maxBuffer: 10 * 1024 * 1024, timeout: 60000 }
+          );
+
+          try {
+            fs.unlinkSync(tempRequestFile);
+          } catch (e) { }
+
+          const lines = stdout.trim().split('\n').filter(line => line.trim());
+          let jsonResult = null;
+          for (const line of lines) {
+            if (line.trim().startsWith('{') || line.trim().startsWith('[')) {
+              try {
+                jsonResult = JSON.parse(line);
+                if (jsonResult.success !== undefined || Array.isArray(jsonResult)) {
+                  break;
+                }
+              } catch (e) {
+                // Not valid JSON
+              }
+            }
+          }
+
+          if (!jsonResult) {
+            throw new Error('No valid JSON response from eval-api.ts');
+          }
+
+          const statusCode = jsonResult.success ? 200 : (jsonResult.error?.code === 'NOT_FOUND' ? 404 : 400);
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(jsonResult));
+        } catch (error) {
+          console.error('[Eval API] Error:', error);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: error.message }
+          }));
+        }
+      })();
+      return;
+    } else if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const pathParts = pathname.split('/').filter(p => p);
+          let command = '';
+          let requestData = {};
+
+          if (pathParts.length === 4 && pathParts[2] === 'cases' && pathParts[3] === 'run') {
+            // POST /api/eval/cases/run
+            command = 'run-case';
+            requestData = JSON.parse(body);
+          } else if (pathParts.length === 3 && pathParts[2] === 'suite') {
+            // POST /api/eval/suite
+            command = 'run-suite';
+            requestData = JSON.parse(body);
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: { code: 'INVALID_PATH', message: 'Invalid path for POST /api/eval' }
+            }));
+            return;
+          }
+
+          const tempRequestFile = path.join(__dirname, `temp-eval-${Date.now()}.json`);
+          fs.writeFileSync(tempRequestFile, JSON.stringify(requestData), 'utf-8');
+
+          const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+          const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+          const scriptPath = path.join(__dirname, 'src', 'web', 'eval-api.ts');
+
+          const { stdout, stderr } = await execAsync(
+            `${tsxCmd} "${scriptPath}" "${command}" "${tempRequestFile}"`,
+            { cwd: __dirname, maxBuffer: 10 * 1024 * 1024, timeout: 120000 }
+          );
+
+          try {
+            fs.unlinkSync(tempRequestFile);
+          } catch (e) { }
+
+          const lines = stdout.trim().split('\n').filter(line => line.trim());
+          let jsonResult = null;
+          for (const line of lines) {
+            if (line.trim().startsWith('{')) {
+              try {
+                jsonResult = JSON.parse(line);
+                if (jsonResult.success !== undefined) {
+                  break;
+                }
+              } catch (e) {
+                // Not valid JSON
+              }
+            }
+          }
+
+          if (!jsonResult) {
+            throw new Error('No valid JSON response from eval-api.ts');
+          }
+
+          const statusCode = jsonResult.success ? 200 : (jsonResult.error?.code === 'NOT_FOUND' ? 404 : 400);
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(jsonResult));
+        } catch (error) {
+          console.error('[Eval API] Error:', error);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: error.message }
+          }));
+        }
+      });
+    } else {
+      res.writeHead(405, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed' }
+      }));
+    }
+  } else if (pathname.startsWith('/api/templates')) {
+    // API для работы с шаблонами сценариев
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', async () => {
+      try {
+        const pathParts = pathname.split('/').filter(p => p);
+        let command = '';
+        let requestData = {};
+        
+        if (req.method === 'GET') {
+          if (pathParts.length === 4 && pathParts[2] === 'apply') {
+            // GET /api/templates/:id/apply?param1=value1&param2=value2
+            command = 'apply-template';
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const params = {};
+            url.searchParams.forEach((value, key) => {
+              params[key] = value;
+            });
+            requestData = {
+              templateId: pathParts[3],
+              parameters: params
+            };
+          } else if (pathParts.length === 4 && pathParts[2] === 'search') {
+            // GET /api/templates/search?category=pattern&tags=approval
+            command = 'search-templates';
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            requestData = {
+              category: url.searchParams.get('category') || undefined,
+              tags: url.searchParams.get('tags') ? url.searchParams.get('tags').split(',') : undefined,
+              name: url.searchParams.get('name') || undefined
+            };
+          } else if (pathParts.length === 3) {
+            // GET /api/templates/:id
+            command = 'get-template';
+            requestData = { templateId: pathParts[2] };
+          } else {
+            // GET /api/templates
+            command = 'list-templates';
+            requestData = {};
+          }
+        } else if (req.method === 'POST' && pathParts.length === 4 && pathParts[2] === 'apply') {
+          // POST /api/templates/:id/apply
+          command = 'apply-template';
+          const bodyData = body ? JSON.parse(body) : {};
+          requestData = {
+            templateId: pathParts[3],
+            parameters: bodyData.parameters || {},
+            overrides: bodyData.overrides || {}
+          };
+        }
+        
+        if (!command) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: { code: 'INVALID_REQUEST', message: 'Invalid endpoint' }
+          }));
+          return;
+        }
+        
+        // Выполняем через tsx
+        const tempRequestFile = path.join(__dirname, `temp-templates-${Date.now()}.json`);
+        fs.writeFileSync(tempRequestFile, JSON.stringify(requestData), 'utf-8');
+        
+        const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+        const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+        const scriptPath = path.join(__dirname, 'src', 'web', 'templates-api.ts');
+        
+        const { stdout, stderr } = await execAsync(
+          `${tsxCmd} "${scriptPath}" "${command}" "${tempRequestFile}"`,
+          { cwd: __dirname, maxBuffer: 10 * 1024 * 1024, timeout: 30000 }
+        );
+        
+        // Удаляем временный файл
+        try {
+          if (fs.existsSync(tempRequestFile)) {
+            fs.unlinkSync(tempRequestFile);
+          }
+        } catch (e) {
+          // Игнорируем ошибки удаления
+        }
+        
+        // Фильтруем PowerShell логи
+        const filteredLines = stdout.split('\n').filter(line => {
+          const trimmed = line.trim();
+          return trimmed && 
+                 !trimmed.startsWith('PS ') && 
+                 !trimmed.startsWith('>') &&
+                 !trimmed.includes('tsx') &&
+                 !trimmed.includes('node_modules');
+        });
+        
+        // Ищем JSON в выводе
+        let jsonLine = null;
+        for (const line of filteredLines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            try {
+              JSON.parse(trimmed);
+              jsonLine = trimmed;
+              break;
+            } catch (e) {
+              // Продолжаем поиск
+            }
+          }
+        }
+        
+        if (!jsonLine) {
+          const errorOutput = filteredLines.join('\n').substring(0, 500);
+          throw new Error('No valid JSON response from templates-api.ts. Output: ' + errorOutput);
+        }
+        
+        // Парсим JSON
+        let result;
+        try {
+          result = JSON.parse(jsonLine);
+        } catch (parseError) {
+          throw new Error('Invalid JSON in response: ' + parseError.message);
+        }
+        
+        const statusCode = result.success ? 200 : (result.error?.code === 'NOT_FOUND' ? 404 : 400);
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        console.error('Error in /api/templates:', error);
+        const errorResponse = {
+          success: false,
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: error.message || 'Unknown error'
+          }
+        };
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(errorResponse));
       }
     });
   } else if (pathname.startsWith('/api/queues')) {
@@ -1927,15 +2506,25 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log('🚀 Веб-сервер запущен!');
   console.log('========================================');
   console.log('📱 Откройте в браузере:');
-  console.log('   http://localhost:' + PORT);
-  console.log('   http://localhost:' + PORT + '/admin-dashboard.html  ⭐ НОВЫЙ Admin Dashboard');
-  console.log('   http://localhost:' + PORT + '/dashboard.html');
+  console.log('   http://localhost:' + PORT + '  ← точка входа (редирект в админку)');
+  console.log('   http://localhost:' + PORT + '/admin  ← админский интерфейс');
+  console.log('   http://localhost:' + PORT + '/admin-dashboard.html');
+  console.log('   http://localhost:' + PORT + '/dashboard.html  (legacy: /legacy-dashboard)');
   console.log('   http://localhost:' + PORT + '/test-agent.html');
   console.log('   http://localhost:' + PORT + '/test-orchestrator.html');
   console.log('   http://localhost:' + PORT + '/test-event-bus.html');
   console.log('   http://localhost:' + PORT + '/observability-dashboard.html');
   console.log('');
   console.log('📡 API Endpoints:');
+  console.log('   GET  /api/eval/cases - список eval-кейсов');
+  console.log('   GET  /api/eval/cases/:id - получить eval-кейс');
+  console.log('   GET  /api/eval/search - поиск eval-кейсов');
+  console.log('   POST /api/eval/cases/run - запустить eval-кейс');
+  console.log('   POST /api/eval/suite - запустить набор eval-кейсов');
+  console.log('   GET  /api/templates - список шаблонов');
+  console.log('   GET  /api/templates/:id - получить шаблон');
+  console.log('   GET  /api/templates/search - поиск шаблонов');
+  console.log('   POST /api/templates/:id/apply - применить шаблон');
   console.log('   GET  /api/scenarios - список сценариев');
   console.log('   POST /api/scenarios - создать сценарий');
   console.log('   GET  /api/scenarios/:id - получить сценарий');

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -203,6 +203,70 @@
             </div>
         </div>
 
+        <!-- LLM Security Eval Tests -->
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">🛡️</span>
+                    LLM Security Eval Tests
+                </h2>
+                <div class="section-actions">
+                    <button class="action-btn success" onclick="runFullEvalSuite()">Запустить все тесты</button>
+                    <button class="action-btn secondary" onclick="loadEvalCases()">Обновить список</button>
+                </div>
+            </div>
+            
+            <!-- Фильтры для eval-кейсов -->
+            <div class="eval-filters" style="margin-bottom: 20px; padding: 16px; background: #f5f5f5; border-radius: 8px;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 4px; font-weight: 600;">Категория:</label>
+                        <select id="evalCategoryFilter" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Все категории</option>
+                            <option value="prompt_injection">Prompt Injection</option>
+                            <option value="system_prompt_leakage">System Prompt Leakage</option>
+                            <option value="insecure_output">Insecure Output</option>
+                            <option value="excessive_agency">Excessive Agency</option>
+                            <option value="data_leakage">Data Leakage</option>
+                            <option value="jailbreak">Jailbreak</option>
+                            <option value="role_playing">Role Playing</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 4px; font-weight: 600;">Серьезность:</label>
+                        <select id="evalSeverityFilter" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Все уровни</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 4px; font-weight: 600;">Поиск:</label>
+                        <input type="text" id="evalSearchInput" placeholder="Название кейса..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onkeyup="filterEvalCases()">
+                    </div>
+                    <div style="display: flex; align-items: flex-end;">
+                        <button class="action-btn" onclick="filterEvalCases()" style="width: 100%;">Применить фильтры</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Список eval-кейсов -->
+            <div id="evalCasesList" class="test-suite">
+                <div style="text-align: center; padding: 40px; color: #666;">
+                    Загрузка eval-кейсов...
+                </div>
+            </div>
+
+            <!-- Результаты выполнения suite -->
+            <div id="evalSuiteResult" style="display: none; margin-top: 20px; padding: 16px; background: #f9f9f9; border-radius: 8px;">
+                <h3 style="margin-bottom: 12px;">Результаты выполнения тестов</h3>
+                <div id="evalSuiteSummary"></div>
+                <div id="evalSuiteDetails" style="margin-top: 16px;"></div>
+            </div>
+        </div>
+
         <!-- Integration Tests -->
         <div class="section-card">
             <div class="section-header">
@@ -285,6 +349,251 @@
                 resultEl.innerHTML = '<strong>✓ Интеграционный тест пройден</strong> (заглушка)';
             }, 2000);
         }
+
+        // Eval Cases Functions
+        let allEvalCases = [];
+        let filteredEvalCases = [];
+
+        async function loadEvalCases() {
+            const listEl = document.getElementById('evalCasesList');
+            listEl.innerHTML = '<div style="text-align: center; padding: 20px;">Загрузка...</div>';
+
+            try {
+                const response = await fetch('/api/eval/cases');
+                const data = await response.json();
+                
+                if (data.success) {
+                    allEvalCases = data.data || [];
+                    filteredEvalCases = [...allEvalCases];
+                    renderEvalCases();
+                } else {
+                    listEl.innerHTML = `<div style="color: red; padding: 20px;">Ошибка: ${data.error?.message || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                listEl.innerHTML = `<div style="color: red; padding: 20px;">Ошибка загрузки: ${error.message}</div>`;
+            }
+        }
+
+        function filterEvalCases() {
+            const category = document.getElementById('evalCategoryFilter').value;
+            const severity = document.getElementById('evalSeverityFilter').value;
+            const search = document.getElementById('evalSearchInput').value.toLowerCase();
+
+            filteredEvalCases = allEvalCases.filter(c => {
+                if (category && c.category !== category) return false;
+                if (severity && c.severity !== severity) return false;
+                if (search && !c.name.toLowerCase().includes(search) && !c.description.toLowerCase().includes(search)) return false;
+                return true;
+            });
+
+            renderEvalCases();
+        }
+
+        function renderEvalCases() {
+            const listEl = document.getElementById('evalCasesList');
+            
+            if (filteredEvalCases.length === 0) {
+                listEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #666;">Кейсы не найдены</div>';
+                return;
+            }
+
+            const severityColors = {
+                low: '#28a745',
+                medium: '#ffc107',
+                high: '#fd7e14',
+                critical: '#dc3545'
+            };
+
+            listEl.innerHTML = filteredEvalCases.map(case_ => `
+                <div class="test-item" style="position: relative;">
+                    <div class="test-info" style="flex: 1;">
+                        <div class="test-name" style="display: flex; align-items: center; gap: 8px;">
+                            ${case_.name}
+                            <span style="font-size: 0.75em; padding: 2px 8px; border-radius: 4px; background: ${severityColors[case_.severity] || '#666'}; color: white;">
+                                ${case_.severity.toUpperCase()}
+                            </span>
+                            <span style="font-size: 0.75em; padding: 2px 8px; border-radius: 4px; background: #e9ecef; color: #495057;">
+                                ${case_.category.replace(/_/g, ' ')}
+                            </span>
+                        </div>
+                        <div class="test-description">${case_.description}</div>
+                        <div style="margin-top: 8px; font-size: 0.875em; color: #666; font-family: monospace; background: #f5f5f5; padding: 8px; border-radius: 4px;">
+                            "${case_.prompt.substring(0, 100)}${case_.prompt.length > 100 ? '...' : ''}"
+                        </div>
+                        <div style="margin-top: 8px; font-size: 0.875em; color: #666;">
+                            Ожидается: <strong>${case_.expectedResult}</strong> | ${case_.expectedBehavior}
+                        </div>
+                    </div>
+                    <div class="test-actions">
+                        <button class="action-btn" onclick="runEvalCase('${case_.id}')" title="Запустить тест">▶️ Запустить</button>
+                        <button class="action-btn secondary" onclick="viewEvalCase('${case_.id}')" title="Подробности">👁️ Детали</button>
+                    </div>
+                    <div class="test-result" id="eval-result-${case_.id}" style="display: none;"></div>
+                </div>
+            `).join('');
+        }
+
+        async function runEvalCase(caseId) {
+            const resultEl = document.getElementById(`eval-result-${caseId}`);
+            resultEl.style.display = 'block';
+            resultEl.className = 'test-result show running';
+            resultEl.innerHTML = '<strong>Запуск eval-кейса...</strong>';
+
+            try {
+                const response = await fetch('/api/eval/cases/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ caseId })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const result = data.data;
+                    const passed = result.passed;
+                    const icon = passed ? '✓' : '✗';
+                    const color = passed ? 'success' : 'error';
+
+                    resultEl.className = `test-result show ${color}`;
+                    resultEl.innerHTML = `
+                        <strong>${icon} ${passed ? 'Тест пройден' : 'Тест провален'}</strong>
+                        <div style="margin-top: 8px; font-size: 0.875em;">
+                            <div><strong>Ожидалось:</strong> ${result.expectedResult}</div>
+                            <div><strong>Получено:</strong> ${result.actualResult}</div>
+                            ${result.reason ? `<div><strong>Причина:</strong> ${result.reason}</div>` : ''}
+                            <div><strong>Длительность:</strong> ${result.duration}ms</div>
+                            ${result.guardrailCheck ? `
+                                <div style="margin-top: 8px;">
+                                    <strong>Guardrail:</strong> ${result.guardrailCheck.allowed ? 'Разрешено' : 'Заблокировано'}
+                                    ${result.guardrailCheck.reason ? ` (${result.guardrailCheck.reason})` : ''}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                } else {
+                    resultEl.className = 'test-result show error';
+                    resultEl.innerHTML = `<strong>✗ Ошибка:</strong> ${data.error?.message || 'Unknown error'}`;
+                }
+            } catch (error) {
+                resultEl.className = 'test-result show error';
+                resultEl.innerHTML = `<strong>✗ Ошибка:</strong> ${error.message}`;
+            }
+        }
+
+        async function viewEvalCase(caseId) {
+            const case_ = allEvalCases.find(c => c.id === caseId);
+            if (!case_) {
+                alert('Кейс не найден');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;';
+            modal.innerHTML = `
+                <div style="background: white; padding: 24px; border-radius: 8px; max-width: 600px; max-height: 80vh; overflow-y: auto;">
+                    <h2 style="margin-bottom: 16px;">${case_.name}</h2>
+                    <div style="margin-bottom: 12px;"><strong>Категория:</strong> ${case_.category}</div>
+                    <div style="margin-bottom: 12px;"><strong>Серьезность:</strong> ${case_.severity}</div>
+                    <div style="margin-bottom: 12px;"><strong>Описание:</strong> ${case_.description}</div>
+                    <div style="margin-bottom: 12px;">
+                        <strong>Промпт:</strong>
+                        <div style="background: #f5f5f5; padding: 12px; border-radius: 4px; margin-top: 8px; font-family: monospace; white-space: pre-wrap;">${case_.prompt}</div>
+                    </div>
+                    <div style="margin-bottom: 12px;"><strong>Ожидаемое поведение:</strong> ${case_.expectedBehavior}</div>
+                    <div style="margin-bottom: 12px;"><strong>Ожидаемый результат:</strong> ${case_.expectedResult}</div>
+                    <div style="margin-top: 20px; display: flex; gap: 8px;">
+                        <button class="action-btn" onclick="this.closest('div[style*=\"position: fixed\"]').remove(); runEvalCase('${caseId}')">Запустить тест</button>
+                        <button class="action-btn secondary" onclick="this.closest('div[style*=\"position: fixed\"]').remove()">Закрыть</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        async function runFullEvalSuite() {
+            const suiteResultEl = document.getElementById('evalSuiteResult');
+            suiteResultEl.style.display = 'block';
+            const summaryEl = document.getElementById('evalSuiteSummary');
+            const detailsEl = document.getElementById('evalSuiteDetails');
+
+            summaryEl.innerHTML = '<div style="text-align: center; padding: 20px;">Запуск набора тестов...</div>';
+            detailsEl.innerHTML = '';
+
+            const category = document.getElementById('evalCategoryFilter').value;
+            const severity = document.getElementById('evalSeverityFilter').value;
+
+            try {
+                const response = await fetch('/api/eval/suite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        category: category || undefined,
+                        severity: severity || undefined,
+                        maxCases: 50
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const suite = data.data;
+                    const passRate = ((suite.passedCases / suite.totalCases) * 100).toFixed(1);
+
+                    summaryEl.innerHTML = `
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px;">
+                            <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+                                <div style="font-size: 2em; font-weight: bold; color: #28a745;">${suite.passedCases}</div>
+                                <div style="color: #666;">Пройдено</div>
+                            </div>
+                            <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+                                <div style="font-size: 2em; font-weight: bold; color: #dc3545;">${suite.failedCases}</div>
+                                <div style="color: #666;">Провалено</div>
+                            </div>
+                            <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+                                <div style="font-size: 2em; font-weight: bold; color: #666;">${suite.totalCases}</div>
+                                <div style="color: #666;">Всего</div>
+                            </div>
+                            <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+                                <div style="font-size: 2em; font-weight: bold; color: #007bff;">${passRate}%</div>
+                                <div style="color: #666;">Успешность</div>
+                            </div>
+                            <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+                                <div style="font-size: 2em; font-weight: bold; color: #666;">${(suite.duration / 1000).toFixed(1)}s</div>
+                                <div style="color: #666;">Длительность</div>
+                            </div>
+                        </div>
+                    `;
+
+                    detailsEl.innerHTML = `
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${suite.results.map(r => `
+                                <div style="padding: 12px; margin-bottom: 8px; background: white; border-radius: 4px; border-left: 4px solid ${r.passed ? '#28a745' : '#dc3545'};">
+                                    <div style="font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                                        <span style="font-size: 1.2em;">${r.passed ? '✓' : '✗'}</span>
+                                        <span>${r.caseName}</span>
+                                    </div>
+                                    <div style="font-size: 0.875em; color: #666; margin-top: 4px; margin-left: 28px;">
+                                        <div><strong>Ожидалось:</strong> <span style="color: ${r.expectedResult === 'blocked' ? '#dc3545' : r.expectedResult === 'modified' ? '#ffc107' : '#28a745'}">${r.expectedResult}</span></div>
+                                        <div><strong>Получено:</strong> <span style="color: ${r.actualResult === 'blocked' ? '#dc3545' : r.actualResult === 'modified' ? '#ffc107' : '#28a745'}">${r.actualResult}</span></div>
+                                        ${r.reason ? `<div style="margin-top: 4px;"><strong>Причина:</strong> ${r.reason}</div>` : ''}
+                                        <div style="margin-top: 4px;"><strong>Длительность:</strong> ${r.duration}ms</div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else {
+                    summaryEl.innerHTML = `<div style="color: red;">Ошибка: ${data.error?.message || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                summaryEl.innerHTML = `<div style="color: red;">Ошибка: ${error.message}</div>`;
+            }
+        }
+
+        // Загружаем eval-кейсы при загрузке страницы
+        window.addEventListener('DOMContentLoaded', () => {
+            loadEvalCases();
+        });
     </script>
 </body>
 </html>

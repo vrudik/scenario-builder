@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Templates Library - Admin Dashboard</title>
+    <link rel="stylesheet" href="/admin-styles.css">
+    <style>
+        .templates-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .template-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+        .template-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .template-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 12px;
+        }
+        .template-title {
+            font-size: 1.25em;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .template-description {
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+        .template-meta {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+        .template-tag {
+            display: inline-block;
+            padding: 4px 12px;
+            background: var(--bg-light);
+            border-radius: 12px;
+            font-size: 0.75em;
+            color: var(--text-secondary);
+        }
+        .template-category {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 500;
+        }
+        .template-category.pattern {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        .template-category.business {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+        .template-category.security {
+            background: #ffebee;
+            color: #c62828;
+        }
+        .template-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .search-filters {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .filter-input {
+            flex: 1;
+            min-width: 200px;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.show {
+            display: flex;
+        }
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 900px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--border);
+        }
+        .modal-title {
+            font-size: 1.5em;
+            font-weight: 600;
+        }
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+        }
+        .close-btn:hover {
+            background: var(--bg-light);
+            color: var(--text-primary);
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        .form-input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.875em;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        .form-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+        .json-preview {
+            background: var(--bg-light);
+            padding: 16px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875em;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .parameter-list {
+            margin-top: 16px;
+        }
+        .parameter-item {
+            padding: 12px;
+            background: var(--bg-light);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .parameter-name {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .parameter-description {
+            font-size: 0.875em;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .parameter-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.875em;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <span>⚙️</span>
+                <span>Scenario Builder Admin</span>
+            </div>
+            <div class="nav-links">
+                <a href="/admin-dashboard.html" class="nav-link">
+                    <span>📊</span>
+                    <span>Overview</span>
+                </a>
+                <a href="/admin-components.html" class="nav-link">
+                    <span>🧩</span>
+                    <span>Components</span>
+                </a>
+                <a href="/admin-testing.html" class="nav-link">
+                    <span>🧪</span>
+                    <span>Testing</span>
+                </a>
+                <a href="/admin-templates.html" class="nav-link active">
+                    <span>📚</span>
+                    <span>Templates</span>
+                </a>
+                <a href="/admin-scenarios.html" class="nav-link">
+                    <span>📋</span>
+                    <span>Scenarios</span>
+                </a>
+                <a href="/admin-queues.html" class="nav-link">
+                    <span>🔄</span>
+                    <span>Queues</span>
+                </a>
+                <a href="/admin-monitoring.html" class="nav-link">
+                    <span>📈</span>
+                    <span>Monitoring</span>
+                </a>
+                <a href="/admin-config.html" class="nav-link">
+                    <span>⚙️</span>
+                    <span>Configuration</span>
+                </a>
+            </div>
+            <div class="nav-status">
+                <span class="status-indicator"></span>
+                <span id="systemStatus">System Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-container">
+        <div class="page-header">
+            <h1 class="page-title">Template Library</h1>
+            <p class="page-subtitle">Библиотека шаблонов для быстрого создания сценариев</p>
+        </div>
+
+        <!-- Search and Filters -->
+        <div class="search-filters">
+            <input type="text" id="searchInput" class="form-input filter-input" placeholder="Поиск по названию...">
+            <select id="categoryFilter" class="form-input" style="width: 200px;">
+                <option value="">Все категории</option>
+                <option value="pattern">Pattern</option>
+                <option value="business">Business</option>
+                <option value="security">Security</option>
+            </select>
+            <button class="action-btn" onclick="loadTemplates()">🔄 Обновить</button>
+        </div>
+
+        <!-- Templates List -->
+        <div id="templatesList">
+            <div class="alert info">Загрузка шаблонов...</div>
+        </div>
+
+        <!-- Apply Template Modal -->
+        <div id="applyModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title">Применить шаблон</h2>
+                    <button class="close-btn" onclick="closeApplyModal()">×</button>
+                </div>
+                <div id="applyModalContent">
+                    <!-- Content will be loaded dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <!-- View Template Modal -->
+        <div id="viewModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title" id="viewModalTitle">Шаблон</h2>
+                    <button class="close-btn" onclick="closeViewModal()">×</button>
+                </div>
+                <div id="viewModalContent">
+                    <!-- Content will be loaded dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allTemplates = [];
+
+        // Загрузка шаблонов
+        async function loadTemplates() {
+            try {
+                const response = await fetch('/api/templates');
+                const result = await response.json();
+                
+                if (result.success) {
+                    allTemplates = result.data;
+                    renderTemplates(allTemplates);
+                } else {
+                    document.getElementById('templatesList').innerHTML = 
+                        `<div class="alert error">Ошибка загрузки: ${result.error?.message || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('templatesList').innerHTML = 
+                    `<div class="alert error">Ошибка: ${error.message}</div>`;
+            }
+        }
+
+        // Фильтрация шаблонов
+        function filterTemplates() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const categoryFilter = document.getElementById('categoryFilter').value;
+            
+            let filtered = allTemplates;
+            
+            if (searchTerm) {
+                filtered = filtered.filter(t => 
+                    t.name.toLowerCase().includes(searchTerm) ||
+                    t.description.toLowerCase().includes(searchTerm) ||
+                    t.tags.some(tag => tag.toLowerCase().includes(searchTerm))
+                );
+            }
+            
+            if (categoryFilter) {
+                filtered = filtered.filter(t => t.category === categoryFilter);
+            }
+            
+            renderTemplates(filtered);
+        }
+
+        // Отображение шаблонов
+        function renderTemplates(templates) {
+            const container = document.getElementById('templatesList');
+            
+            if (templates.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <p>Шаблоны не найдены</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = templates.map(template => `
+                <div class="template-card" onclick="viewTemplate('${template.id}')">
+                    <div class="template-header">
+                        <div>
+                            <div class="template-title">${template.name}</div>
+                            <div class="template-description">${template.description}</div>
+                        </div>
+                        <div class="template-actions">
+                            <button class="action-btn btn-small" onclick="event.stopPropagation(); applyTemplate('${template.id}')">
+                                Применить
+                            </button>
+                        </div>
+                    </div>
+                    <div class="template-meta">
+                        <span class="template-category ${template.category}">${template.category}</span>
+                        ${template.tags.map(tag => `<span class="template-tag">${tag}</span>`).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Просмотр шаблона
+        async function viewTemplate(templateId) {
+            const template = allTemplates.find(t => t.id === templateId);
+            if (!template) return;
+            
+            document.getElementById('viewModalTitle').textContent = template.name;
+            document.getElementById('viewModalContent').innerHTML = `
+                <div class="form-group">
+                    <div class="form-label">Описание</div>
+                    <p>${template.description}</p>
+                </div>
+                <div class="form-group">
+                    <div class="form-label">Категория</div>
+                    <span class="template-category ${template.category}">${template.category}</span>
+                </div>
+                <div class="form-group">
+                    <div class="form-label">Теги</div>
+                    <div>${template.tags.map(tag => `<span class="template-tag">${tag}</span>`).join('')}</div>
+                </div>
+                ${template.parameters && template.parameters.length > 0 ? `
+                    <div class="form-group">
+                        <div class="form-label">Параметры</div>
+                        <div class="parameter-list">
+                            ${template.parameters.map(param => `
+                                <div class="parameter-item">
+                                    <div class="parameter-name">${param.name} ${param.required ? '<span style="color: red;">*</span>' : ''}</div>
+                                    <div class="parameter-description">${param.description}</div>
+                                    <div style="font-size: 0.75em; color: var(--text-secondary);">
+                                        Тип: ${param.type}
+                                        ${param.default !== undefined ? `, По умолчанию: ${JSON.stringify(param.default)}` : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+                <div class="form-group">
+                    <div class="form-label">Предпросмотр спецификации</div>
+                    <div class="json-preview">${JSON.stringify(template.spec, null, 2)}</div>
+                </div>
+                <div class="form-actions">
+                    <button class="action-btn" onclick="applyTemplate('${template.id}')">Применить шаблон</button>
+                    <button class="action-btn secondary" onclick="closeViewModal()">Закрыть</button>
+                </div>
+            `;
+            document.getElementById('viewModal').classList.add('show');
+        }
+
+        // Применение шаблона
+        async function applyTemplate(templateId) {
+            const template = allTemplates.find(t => t.id === templateId);
+            if (!template) return;
+            
+            closeViewModal();
+            
+            // Если есть параметры, показываем форму
+            if (template.parameters && template.parameters.length > 0) {
+                showApplyForm(template);
+            } else {
+                // Применяем без параметров
+                await doApplyTemplate(templateId, {});
+            }
+        }
+
+        // Показ формы применения
+        function showApplyForm(template) {
+            document.getElementById('applyModalContent').innerHTML = `
+                <div class="form-group">
+                    <div class="form-label">Шаблон: ${template.name}</div>
+                    <p style="color: var(--text-secondary);">${template.description}</p>
+                </div>
+                <div class="form-group">
+                    <div class="form-label">ID сценария</div>
+                    <input type="text" id="scenarioId" class="form-input" placeholder="scenario-${template.id}-${Date.now()}" required>
+                </div>
+                <div class="form-group">
+                    <div class="form-label">Название сценария</div>
+                    <input type="text" id="scenarioName" class="form-input" placeholder="${template.name}" required>
+                </div>
+                ${template.parameters.map(param => `
+                    <div class="form-group">
+                        <div class="form-label">
+                            ${param.name} ${param.required ? '<span style="color: red;">*</span>' : ''}
+                        </div>
+                        <div style="font-size: 0.875em; color: var(--text-secondary); margin-bottom: 6px;">
+                            ${param.description}
+                        </div>
+                        ${param.type === 'array' ? `
+                            <input type="text" id="param_${param.name}" class="form-input" 
+                                   placeholder='["value1", "value2"]' 
+                                   ${param.required ? 'required' : ''}>
+                        ` : param.type === 'boolean' ? `
+                            <select id="param_${param.name}" class="form-input" ${param.required ? 'required' : ''}>
+                                <option value="false">false</option>
+                                <option value="true">true</option>
+                            </select>
+                        ` : `
+                            <input type="${param.type === 'number' ? 'number' : 'text'}" 
+                                   id="param_${param.name}" 
+                                   class="form-input" 
+                                   placeholder="${param.default !== undefined ? JSON.stringify(param.default) : ''}"
+                                   ${param.required ? 'required' : ''}>
+                        `}
+                    </div>
+                `).join('')}
+                <div class="form-actions">
+                    <button class="action-btn" onclick="submitApplyForm('${template.id}')">Создать сценарий</button>
+                    <button class="action-btn secondary" onclick="closeApplyModal()">Отмена</button>
+                </div>
+            `;
+            document.getElementById('applyModal').classList.add('show');
+        }
+
+        // Отправка формы применения
+        async function submitApplyForm(templateId) {
+            const template = allTemplates.find(t => t.id === templateId);
+            if (!template) return;
+            
+            const scenarioId = document.getElementById('scenarioId').value;
+            const scenarioName = document.getElementById('scenarioName').value;
+            
+            // Собираем параметры
+            const parameters = {};
+            template.parameters.forEach(param => {
+                const input = document.getElementById(`param_${param.name}`);
+                if (input && input.value) {
+                    if (param.type === 'array') {
+                        try {
+                            parameters[param.name] = JSON.parse(input.value);
+                        } catch (e) {
+                            parameters[param.name] = input.value.split(',').map(v => v.trim());
+                        }
+                    } else if (param.type === 'number') {
+                        parameters[param.name] = parseFloat(input.value);
+                    } else if (param.type === 'boolean') {
+                        parameters[param.name] = input.value === 'true';
+                    } else {
+                        parameters[param.name] = input.value;
+                    }
+                } else if (param.default !== undefined) {
+                    parameters[param.name] = param.default;
+                }
+            });
+            
+            // Применяем шаблон
+            await doApplyTemplate(templateId, parameters, {
+                id: scenarioId,
+                name: scenarioName
+            });
+        }
+
+        // Применение шаблона
+        async function doApplyTemplate(templateId, parameters, overrides = {}) {
+            try {
+                const response = await fetch(`/api/templates/${templateId}/apply`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        parameters,
+                        overrides
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Сохраняем сценарий
+                    const scenarioResponse = await fetch('/api/scenarios', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(result.data)
+                    });
+                    
+                    const scenarioResult = await scenarioResponse.json();
+                    
+                    if (scenarioResult.success) {
+                        alert('Сценарий успешно создан из шаблона!');
+                        closeApplyModal();
+                        window.location.href = '/admin-scenarios.html';
+                    } else {
+                        alert('Ошибка сохранения сценария: ' + (scenarioResult.error?.message || 'Unknown error'));
+                    }
+                } else {
+                    alert('Ошибка применения шаблона: ' + (result.error?.message || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
+            }
+        }
+
+        // Закрытие модальных окон
+        function closeApplyModal() {
+            document.getElementById('applyModal').classList.remove('show');
+        }
+
+        function closeViewModal() {
+            document.getElementById('viewModal').classList.remove('show');
+        }
+
+        // Обработчики событий
+        document.getElementById('searchInput').addEventListener('input', filterTemplates);
+        document.getElementById('categoryFilter').addEventListener('change', filterTemplates);
+
+        // Закрытие модальных окон при клике вне их
+        document.getElementById('applyModal').addEventListener('click', function(e) {
+            if (e.target === this) closeApplyModal();
+        });
+        document.getElementById('viewModal').addEventListener('click', function(e) {
+            if (e.target === this) closeViewModal();
+        });
+
+        // Загрузка при старте
+        window.addEventListener('load', () => {
+            loadTemplates();
+        });
+    </script>
+</body>
+</html>

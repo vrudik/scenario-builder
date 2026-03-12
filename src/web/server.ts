@@ -2,7 +2,7 @@
  * Веб-сервер для просмотра результатов тестов и работы системы
  */
 
-import { createServer } from 'http';
+import { createServer, type ServerResponse } from 'http';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -25,6 +25,8 @@ interface ComponentStatus {
   tests: TestResult[];
 }
 
+const projectRoot = join(__dirname, '../..');
+
 const server = createServer((req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   const pathname = url.pathname;
@@ -35,7 +37,23 @@ const server = createServer((req, res) => {
 
   if (pathname === '/' || pathname === '/index.html') {
     res.writeHead(200);
-    res.end(getIndexHTML());
+    res.end(getEntryHTML());
+  } else if (pathname.startsWith('/admin-')) {
+    const fileName = pathname.slice(1);
+    const filePath = join(projectRoot, fileName);
+    const contentType =
+      pathname.endsWith('.css') ? 'text/css' :
+      pathname.endsWith('.js') ? 'application/javascript' :
+      'text/html; charset=utf-8';
+    serveFile(res, filePath, contentType);
+  } else if (/^\/[^/]+\.(html|css|js)$/.test(pathname)) {
+    const fileName = pathname.slice(1);
+    const filePath = join(projectRoot, fileName);
+    const contentType =
+      pathname.endsWith('.css') ? 'text/css' :
+      pathname.endsWith('.js') ? 'application/javascript' :
+      'text/html; charset=utf-8';
+    serveFile(res, filePath, contentType);
   } else if (pathname === '/api/status') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
@@ -44,11 +62,112 @@ const server = createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify(getTestResults(), null, 2));
+  } else if (pathname === '/api/metrics') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ metrics: [], message: 'Запустите node server.cjs для полных метрик' }));
+  } else if (pathname === '/api/scenarios' || pathname.startsWith('/api/scenarios/')) {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    if (pathname === '/api/scenarios') {
+      res.end(JSON.stringify({ success: true, scenarios: [] }));
+    } else {
+      res.end(JSON.stringify({ success: true, scenario: null, executions: [] }));
+    }
+  } else if (pathname === '/api/templates' || pathname.startsWith('/api/templates/')) {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, data: [], templates: [] }));
+  } else if (pathname === '/api/eval/cases' || pathname.startsWith('/api/eval/')) {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    if (pathname === '/api/eval/cases') {
+      res.end(JSON.stringify({ success: true, data: [] }));
+    } else {
+      res.end(JSON.stringify({ success: true, data: { passedCases: 0, failedCases: 0, results: [] } }));
+    }
+  } else if (pathname.startsWith('/api/event-bus/')) {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, events: [] }));
+  } else if (pathname === '/api/queue-processor/status' || pathname.startsWith('/api/queue-processor/')) {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, running: false, message: 'Запустите node server.cjs для очередей' }));
+  } else if (pathname === '/api/queues' || pathname.startsWith('/api/queues')) {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, queues: [], data: [] }));
+  } else if (pathname.startsWith('/api/')) {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(404);
+    res.end(JSON.stringify({ error: 'Not found', code: 404 }));
   } else {
     res.writeHead(404);
     res.end('Not Found');
   }
 });
+
+function serveFile(res: ServerResponse, filePath: string, contentType: string): void {
+  try {
+    if (!existsSync(filePath)) {
+      res.writeHead(404);
+      res.end('Not Found');
+      return;
+    }
+    const data = readFileSync(filePath, 'utf-8');
+    res.writeHead(200, { 'Content-Type': contentType });
+    res.end(data);
+  } catch {
+    res.writeHead(500);
+    res.end('Error');
+  }
+}
+
+function getEntryHTML(): string {
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scenario Builder</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      color: #fff;
+    }
+    h1 { font-size: 1.75rem; margin-bottom: 8px; font-weight: 600; }
+    p { color: rgba(255,255,255,0.85); margin-bottom: 32px; font-size: 1rem; }
+    .btn-admin {
+      display: inline-block;
+      padding: 16px 32px;
+      background: #3b82f6;
+      color: white !important;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 1.1rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 14px rgba(59,130,246,0.4);
+      transition: background .2s, transform .1s;
+    }
+    .btn-admin:hover { background: #2563eb; transform: translateY(-1px); }
+  </style>
+</head>
+<body>
+  <h1>Конструктор сценариев</h1>
+  <p>Платформа автономных сценариев и агентных процессов</p>
+  <a href="/admin-dashboard.html" class="btn-admin">Админский интерфейс</a>
+</body>
+</html>`;
+}
 
 function getIndexHTML(): string {
   return `<!DOCTYPE html>
