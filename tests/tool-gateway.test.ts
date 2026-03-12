@@ -115,6 +115,32 @@ describe('ToolGateway', () => {
     expect(response.error?.code).toBe('ACCESS_DENIED');
   });
 
+
+  it('должен возвращать ошибку EXECUTOR_NOT_FOUND если executor не найден', async () => {
+    gateway.setSandboxMode(false);
+
+    const context: ToolRequestContext = {
+      scenarioId: 'test-scenario',
+      executionId: 'test-exec',
+      userId: 'test-user',
+      userRoles: ['user']
+    };
+
+    const request: ToolRequest = {
+      toolId: 'test-tool',
+      inputs: {},
+      context
+    };
+
+    await expect(gateway.execute(request, testTool)).resolves.toMatchObject({
+      success: false,
+      error: {
+        code: 'EXECUTOR_NOT_FOUND',
+        message: 'No executor registered for tool: test-tool'
+      }
+    });
+  });
+
   it('должен применять rate limiting', async () => {
     gateway.setSandboxMode(false);
 
