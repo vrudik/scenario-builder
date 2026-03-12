@@ -213,6 +213,7 @@ export class ToolGateway {
     if (!executor) {
       executor = this.getExecutor(tool.id);
       if (!executor) {
+        const latency = Date.now() - startTime;
         return {
           success: false,
           error: {
@@ -220,7 +221,7 @@ export class ToolGateway {
             message: `No executor registered for tool: ${tool.id}`
           },
           metadata: {
-            latency: Date.now() - startTime,
+            latency,
             timestamp: new Date().toISOString(),
             traceId: request.context.traceId,
             spanId: request.context.spanId
