@@ -132,6 +132,11 @@ export class FallbackManager {
     return {
       nodes,
       edges,
+      traversal: {
+        decision: 'first-match-else-default',
+        parallel: 'all-matching',
+        default: 'first-match'
+      },
       metadata: {
         version: '0.1.0',
         compiledAt: new Date().toISOString(),

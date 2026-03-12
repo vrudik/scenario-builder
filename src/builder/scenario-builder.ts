@@ -80,6 +80,7 @@ export class ScenarioBuilder {
     nodes.push(startNode);
 
     // Создание узлов для каждого триггера
+    const triggerNodeIds: string[] = [];
     spec.triggers.forEach((trigger, index) => {
       const triggerNode: WorkflowNode = {
         id: `trigger-${index}`,
@@ -91,6 +92,7 @@ export class ScenarioBuilder {
         }
       };
       nodes.push(triggerNode);
+      triggerNodeIds.push(triggerNode.id);
       edges.push({
         from: 'start',
         to: triggerNode.id
@@ -113,12 +115,15 @@ export class ScenarioBuilder {
       nodes.push(actionNode);
 
       // Связывание с предыдущим узлом
-      if (index === 0 && spec.triggers.length > 0) {
-        edges.push({
-          from: `trigger-0`,
-          to: actionNode.id
+      if (index === 0) {
+        // Fan-in/fan-out: первый action доступен из любого trigger
+        triggerNodeIds.forEach(triggerNodeId => {
+          edges.push({
+            from: triggerNodeId,
+            to: actionNode.id
+          });
         });
-      } else if (index > 0) {
+      } else {
         edges.push({
           from: `action-${spec.allowedActions[index - 1].id}`,
           to: actionNode.id
@@ -140,11 +145,24 @@ export class ScenarioBuilder {
         from: `action-${lastAction.id}`,
         to: 'end'
       });
+    } else {
+      // Пустой пайплайн действий: каждый trigger завершает workflow напрямую
+      triggerNodeIds.forEach(triggerNodeId => {
+        edges.push({
+          from: triggerNodeId,
+          to: 'end'
+        });
+      });
     }
 
     return {
       nodes,
       edges,
+      traversal: {
+        decision: 'first-match-else-default',
+        parallel: 'all-matching',
+        default: 'first-match'
+      },
       metadata: {
         version: '0.1.0',
         compiledAt: new Date().toISOString(),

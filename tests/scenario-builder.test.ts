@@ -3,7 +3,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ScenarioBuilder, ScenarioSpecValidator } from '../src';
+import { ScenarioBuilder } from '../src/builder/scenario-builder';
+import { ScenarioSpecValidator } from '../src/spec/scenario-spec';
 import { ScenarioSpec, RiskClass, TriggerType } from '../src/spec';
 
 describe('ScenarioBuilder', () => {
@@ -49,6 +50,7 @@ describe('ScenarioBuilder', () => {
     expect(graph.edges).toBeDefined();
     expect(graph.metadata).toBeDefined();
     expect(graph.metadata.specId).toBe(spec.id);
+    expect(graph.traversal.default).toBe('first-match');
   });
 
   it('должен создавать правильную структуру workflow graph', () => {
@@ -68,6 +70,25 @@ describe('ScenarioBuilder', () => {
     // Должны быть узлы для действий
     const actionNodes = graph.nodes.filter(n => n.type === 'action');
     expect(actionNodes.length).toBeGreaterThan(0);
+  });
+
+  it('должен строить fan-out от start к нескольким trigger и fan-in к первому action', () => {
+    const spec = createTestSpec();
+    spec.triggers = [
+      { type: TriggerType.EVENT, source: 'events.a' },
+      { type: TriggerType.WEBHOOK, source: 'webhook.b' }
+    ];
+
+    const graph = builder.compile(spec);
+
+    const triggerNodes = graph.nodes.filter(node => node.id.startsWith('trigger-'));
+    expect(triggerNodes).toHaveLength(2);
+
+    const startToTriggers = graph.edges.filter(edge => edge.from === 'start' && edge.to.startsWith('trigger-'));
+    expect(startToTriggers).toHaveLength(2);
+
+    const triggerToFirstAction = graph.edges.filter(edge => edge.to === 'action-tool-1' && edge.from.startsWith('trigger-'));
+    expect(triggerToFirstAction).toHaveLength(2);
   });
 
   it('должен генерировать политику исполнения', () => {
@@ -93,7 +114,7 @@ describe('ScenarioBuilder', () => {
   it('должен использовать canary для высокорисковых сценариев', () => {
     const spec = createTestSpec();
     spec.riskClass = RiskClass.HIGH;
-    
+
     const descriptor = builder.generateDeploymentDescriptor(spec);
     expect(descriptor.strategy).toBe('canary');
     expect(descriptor.canaryConfig).toBeDefined();
