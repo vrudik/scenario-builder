@@ -23,12 +23,43 @@ export interface WorkflowNode {
 export interface WorkflowEdge {
   from: string;
   to: string;
+  /**
+   * Условие перехода.
+   *
+   * Поддерживаемые формы в runtime:
+   * - "true" / "false"
+   * - "field" (truthy проверка поля в outputs текущего узла)
+   * - "field == value" / "field != value"
+   */
   condition?: string;
+}
+
+export interface WorkflowTraversalStrategy {
+  /**
+   * Для decision узла выбирается первый подходящий edge,
+   * иначе fallback edge без condition.
+   */
+  decision: 'first-match-else-default';
+  /**
+   * Для parallel узла запускаются все подходящие edge.
+   */
+  parallel: 'all-matching';
+  /**
+   * Для остальных узлов без специальных правил:
+   * для совместимости берется первый подходящий edge.
+   */
+  default: 'first-match';
 }
 
 export interface WorkflowGraph {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
+  /**
+   * Контракт обхода графа.
+   * Runtime должен читать эту стратегию и выбирать следующий узел
+   * согласно типу текущего узла.
+   */
+  traversal: WorkflowTraversalStrategy;
   metadata: {
     version: string;
     compiledAt: string;

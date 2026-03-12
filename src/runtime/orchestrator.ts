@@ -10,7 +10,7 @@
  * - Saga/Compensation: для длинных транзакций обязательна поддержка компенсации
  */
 
-import { WorkflowGraph, WorkflowNode } from '../builder';
+import { WorkflowGraph, WorkflowNode, WorkflowEdge } from '../builder';
 import { ScenarioSpec } from '../spec';
 import { ToolGateway, ToolRequest, ToolRequestContext } from '../gateway';
 import { RegisteredTool, ToolRegistry } from '../registry';
@@ -325,10 +325,22 @@ export class Orchestrator {
           state.compensationStack.push(currentNode.id);
         }
 
-        // Находим следующий узел
-        const nextNodeId = this.findNextNode(currentNode.id, workflowGraph);
-        
-        if (nextNodeId === 'end') {
+        // Находим следующие переходы с учетом условий и типа узла
+        const nextEdges = this.findNextEdges(currentNode, workflowGraph, result.outputs);
+
+        if (nextEdges.length === 0) {
+          state.completed = true;
+          void this.auditService?.logScenarioCompleted({
+            scenarioId: context.scenarioId,
+            executionId: context.executionId,
+            userId: context.userId,
+            traceId: context.traceId,
+            spanId: context.spanId,
+          });
+          return;
+        }
+
+        if (nextEdges.some(edge => edge.to === 'end')) {
           state.completed = true;
           state.currentNodeId = 'end';
           void this.auditService?.logScenarioCompleted({
@@ -338,19 +350,17 @@ export class Orchestrator {
             traceId: context.traceId,
             spanId: context.spanId,
           });
-        } else if (nextNodeId) {
-          state.currentNodeId = nextNodeId;
-          // Рекурсивно продолжаем выполнение
+          return;
+        }
+
+        // Для parallel выполняем все ветки последовательно в рамках in-memory исполнения
+        for (const edge of nextEdges) {
+          state.currentNodeId = edge.to;
           await this.executeWorkflow(context, state);
-        } else {
-          state.completed = true;
-          void this.auditService?.logScenarioCompleted({
-            scenarioId: context.scenarioId,
-            executionId: context.executionId,
-            userId: context.userId,
-            traceId: context.traceId,
-            spanId: context.spanId,
-          });
+
+          if (state.failed || state.completed) {
+            return;
+          }
         }
       } else {
         // Узел завершился с ошибкой - запускаем компенсацию
@@ -716,8 +726,15 @@ export class Orchestrator {
   private getPreviousNodeOutputs(
     currentNodeId: string,
     state: WorkflowExecutionState,
-    graph: WorkflowGraph
+    graph?: WorkflowGraph
   ): Record<string, unknown> | null {
+    if (!graph) {
+      const lastResultWithOutput = Array.from(state.nodeResults.values())
+        .reverse()
+        .find(nodeResult => nodeResult.outputs && nodeResult.nodeId !== currentNodeId);
+      return (lastResultWithOutput?.outputs as Record<string, unknown>) || null;
+    }
+
     // Находим предыдущий узел через edges
     const incomingEdge = graph.edges.find(e => e.to === currentNodeId);
     if (!incomingEdge) {
@@ -725,7 +742,7 @@ export class Orchestrator {
     }
     
     const previousNodeResult = state.nodeResults.get(incomingEdge.from);
-    return previousNodeResult?.outputs || null;
+    return (previousNodeResult?.outputs as Record<string, unknown>) || null;
   }
 
   /**
@@ -755,11 +772,115 @@ export class Orchestrator {
   }
 
   /**
-   * Поиск следующего узла в workflow
+   * Поиск следующих переходов в workflow.
+   *
+   * Поведение:
+   * - decision: первый подходящий condition, иначе edge без condition
+   * - parallel: все подходящие edges
+   * - остальные узлы: первый подходящий edge
    */
-  private findNextNode(currentNodeId: string, graph: WorkflowGraph): string | null {
-    const edge = graph.edges.find(e => e.from === currentNodeId);
-    return edge ? edge.to : null;
+  private findNextEdges(
+    currentNode: WorkflowNode,
+    graph: WorkflowGraph,
+    outputs?: Record<string, unknown>
+  ): WorkflowEdge[] {
+    const outgoingEdges = graph.edges.filter(edge => edge.from === currentNode.id);
+
+    if (outgoingEdges.length === 0) {
+      return [];
+    }
+
+    const conditionalEdges = outgoingEdges.filter(edge => edge.condition);
+    const defaultEdges = outgoingEdges.filter(edge => !edge.condition);
+
+    if (currentNode.type === 'decision') {
+      for (const edge of conditionalEdges) {
+        if (this.matchesCondition(edge.condition, outputs)) {
+          return [edge];
+        }
+      }
+
+      return defaultEdges.length > 0 ? [defaultEdges[0]] : [];
+    }
+
+    if (currentNode.type === 'parallel') {
+      const matchedConditional = conditionalEdges.filter(edge => this.matchesCondition(edge.condition, outputs));
+      return [...matchedConditional, ...defaultEdges];
+    }
+
+    const firstConditional = conditionalEdges.find(edge => this.matchesCondition(edge.condition, outputs));
+    if (firstConditional) {
+      return [firstConditional];
+    }
+
+    return defaultEdges.length > 0 ? [defaultEdges[0]] : [];
+  }
+
+  private matchesCondition(
+    condition: string | undefined,
+    outputs?: Record<string, unknown>
+  ): boolean {
+    if (!condition) {
+      return true;
+    }
+
+    const normalized = condition.trim();
+    if (normalized === 'true') {
+      return true;
+    }
+    if (normalized === 'false') {
+      return false;
+    }
+
+    const equalsMatch = normalized.match(/^([a-zA-Z0-9_.-]+)\s*(==|!=)\s*(.+)$/);
+    if (equalsMatch) {
+      const [, field, operator, rawExpected] = equalsMatch;
+      const actual = this.getOutputValue(outputs, field);
+      const expected = this.parseConditionValue(rawExpected.trim());
+      return operator === '==' ? actual === expected : actual !== expected;
+    }
+
+    const value = this.getOutputValue(outputs, normalized);
+    return Boolean(value);
+  }
+
+  private getOutputValue(outputs: Record<string, unknown> | undefined, path: string): unknown {
+    if (!outputs) {
+      return undefined;
+    }
+
+    return path.split('.').reduce<unknown>((current, segment) => {
+      if (current && typeof current === 'object' && segment in (current as Record<string, unknown>)) {
+        return (current as Record<string, unknown>)[segment];
+      }
+
+      return undefined;
+    }, outputs);
+  }
+
+  private parseConditionValue(value: string): unknown {
+    if (value === 'true') {
+      return true;
+    }
+
+    if (value === 'false') {
+      return false;
+    }
+
+    if (value === 'null') {
+      return null;
+    }
+
+    const numeric = Number(value);
+    if (!Number.isNaN(numeric) && value !== '') {
+      return numeric;
+    }
+
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      return value.slice(1, -1);
+    }
+
+    return value;
   }
 
   /**
