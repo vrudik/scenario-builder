@@ -3,13 +3,13 @@
  */
 
 import { createServer } from 'http';
-import { readFileSync, existsSync, statSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
 
 interface ComponentStatus {
   name: string;
@@ -291,7 +291,7 @@ const HTML = `<!DOCTYPE html>
 </html>`;
 
 const server = createServer((req, res) => {
-  const url = new URL(req.url || '/', \`http://\${req.headers.host}\`);
+  const url = new URL(req.url || '/', `http://${req.headers.host}`);
   const pathname = url.pathname;
 
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -315,7 +315,7 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(\`🚀 Веб-сервер запущен на http://localhost:\${PORT}\`);
-  console.log(\`📊 Откройте браузер и перейдите по адресу http://localhost:\${PORT}\`);
-  console.log(\`⏹️  Для остановки нажмите Ctrl+C\`);
+  console.log(`🚀 Веб-сервер запущен на http://localhost:${PORT}`);
+  console.log(`📊 Откройте браузер и перейдите по адресу http://localhost:${PORT}`);
+  console.log(`⏹️  Для остановки нажмите Ctrl+C`);
 });
