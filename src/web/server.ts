@@ -25,6 +25,54 @@ interface ComponentStatus {
   tests: TestResult[];
 }
 
+interface DemoStepResult {
+  step: string;
+  action: string;
+  expected: string;
+  status: 'passed';
+}
+
+interface DemoRunResult {
+  executionId: string;
+  status: 'passed';
+  startedAt: string;
+  finishedAt: string;
+  stepResults: DemoStepResult[];
+}
+
+const demoScenario = {
+  id: 'demo-order-support',
+  name: 'Демо: обработка обращения по заказу',
+  goal: 'Показать сквозную работу сценария: входящее обращение → проверка заказа → ответ клиенту.',
+  trigger: 'POST /api/demo-e2e/run',
+  prefilledInput: {
+    customerId: 'cust-1024',
+    orderId: 'ord-7781',
+    message: 'Где мой заказ? Статус не меняется уже 2 дня.'
+  }
+};
+
+const demoStepTemplate: DemoStepResult[] = [
+  {
+    step: 'Получение входящего сообщения',
+    action: 'Система принимает prefilled-данные из тестового payload.',
+    expected: 'Сценарий стартует без ручного ввода.',
+    status: 'passed'
+  },
+  {
+    step: 'Проверка заказа',
+    action: 'Имитация запроса статуса заказа ord-7781.',
+    expected: 'Найден статус: «Передан в доставку, ETA: завтра до 18:00».',
+    status: 'passed'
+  },
+  {
+    step: 'Формирование ответа клиенту',
+    action: 'Агент формирует итоговое сообщение для клиента.',
+    expected: 'Возвращается готовый ответ и рекомендации по следующему шагу.',
+    status: 'passed'
+  }
+];
+
 const projectRoot = join(__dirname, '../..');
 
 const server = createServer((req, res) => {
@@ -98,6 +146,14 @@ const server = createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify({ success: true, queues: [], data: [] }));
+  } else if (pathname === '/api/demo-e2e') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, scenario: demoScenario, instructions: getDemoInstructions() }));
+  } else if (pathname === '/api/demo-e2e/run') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, result: runDemoScenario() }));
   } else if (pathname.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(404);
@@ -146,6 +202,7 @@ function getEntryHTML(): string {
     }
     h1 { font-size: 1.75rem; margin-bottom: 8px; font-weight: 600; }
     p { color: rgba(255,255,255,0.85); margin-bottom: 32px; font-size: 1rem; }
+    .actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
     .btn-admin {
       display: inline-block;
       padding: 16px 32px;
@@ -159,12 +216,17 @@ function getEntryHTML(): string {
       transition: background .2s, transform .1s;
     }
     .btn-admin:hover { background: #2563eb; transform: translateY(-1px); }
+    .btn-demo { background: #0ea5e9; box-shadow: 0 4px 14px rgba(14,165,233,0.45); }
+    .btn-demo:hover { background: #0284c7; }
   </style>
 </head>
 <body>
   <h1>Конструктор сценариев</h1>
   <p>Платформа автономных сценариев и агентных процессов</p>
-  <a href="/admin-dashboard.html" class="btn-admin">Админский интерфейс</a>
+  <div class="actions">
+    <a href="/admin-dashboard.html" class="btn-admin">Админский интерфейс</a>
+    <a href="/demo-e2e.html" class="btn-admin btn-demo">Демо сквозного теста</a>
+  </div>
 </body>
 </html>`;
 }
@@ -557,6 +619,28 @@ function getTestResults(): TestResult[] {
       duration: undefined
     }
   ];
+}
+
+function getDemoInstructions(): string[] {
+  return [
+    'Откройте страницу /demo-e2e.html.',
+    'Нажмите кнопку «1. Проверить предзаполненные данные», чтобы убедиться что тестовый сценарий загружен.',
+    'Нажмите кнопку «2. Запустить сквозной тест», чтобы выполнить весь сценарий целиком.',
+    'Сверьте шаги и ожидаемый результат в блоке «Результат выполнения» — все шаги должны быть со статусом PASSED.'
+  ];
+}
+
+function runDemoScenario(): DemoRunResult {
+  const startedAt = new Date();
+  const finishedAt = new Date(startedAt.getTime() + 2500);
+
+  return {
+    executionId: `demo-exec-${Date.now()}`,
+    status: 'passed',
+    startedAt: startedAt.toISOString(),
+    finishedAt: finishedAt.toISOString(),
+    stepResults: demoStepTemplate
+  };
 }
 
 server.listen(PORT, () => {

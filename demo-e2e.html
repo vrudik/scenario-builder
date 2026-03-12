@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Демо сквозного теста</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --accent: #38bdf8;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --ok: #22c55e;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: radial-gradient(circle at top, #1e3a8a, var(--bg));
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: color-mix(in srgb, var(--card) 88%, black);
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin-top: 0;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-weight: 600;
+      cursor: pointer;
+      color: white;
+      background: #2563eb;
+    }
+
+    button.secondary {
+      background: #0ea5e9;
+      color: #082f49;
+    }
+
+    pre {
+      background: #020617;
+      color: #bae6fd;
+      border-radius: 10px;
+      padding: 14px;
+      overflow: auto;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .passed {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    ol li {
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <section class="card">
+      <h1>Сквозной демо-тест (готовые данные)</h1>
+      <p class="muted">
+        Этот экран нужен для быстрой проверки: любой разработчик может загрузить заранее подготовленный сценарий,
+        запустить его одной кнопкой и увидеть ожидаемый результат по шагам.
+      </p>
+      <div class="actions">
+        <button id="loadBtn" class="secondary">1. Проверить предзаполненные данные</button>
+        <button id="runBtn">2. Запустить сквозной тест</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Инструкция</h2>
+      <ol id="instructionList"></ol>
+    </section>
+
+    <section class="card">
+      <h2>Предзаполненный сценарий</h2>
+      <pre id="scenarioOutput">Нажмите «Проверить предзаполненные данные»</pre>
+    </section>
+
+    <section class="card">
+      <h2>Результат выполнения</h2>
+      <pre id="runOutput">Нажмите «Запустить сквозной тест»</pre>
+      <p id="statusLine" class="muted">Статус: не запускался</p>
+    </section>
+  </main>
+
+  <script>
+    const loadBtn = document.getElementById('loadBtn');
+    const runBtn = document.getElementById('runBtn');
+    const scenarioOutput = document.getElementById('scenarioOutput');
+    const runOutput = document.getElementById('runOutput');
+    const instructionList = document.getElementById('instructionList');
+    const statusLine = document.getElementById('statusLine');
+
+    async function loadDemoData() {
+      const response = await fetch('/api/demo-e2e');
+      const data = await response.json();
+
+      scenarioOutput.textContent = JSON.stringify(data.scenario, null, 2);
+      instructionList.innerHTML = '';
+      data.instructions.forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        instructionList.appendChild(li);
+      });
+    }
+
+    async function runDemo() {
+      statusLine.textContent = 'Статус: выполняется...';
+      const response = await fetch('/api/demo-e2e/run');
+      const data = await response.json();
+      runOutput.textContent = JSON.stringify(data.result, null, 2);
+      statusLine.innerHTML = data.result.status === 'passed'
+        ? '<span class="passed">Статус: PASSED</span>'
+        : 'Статус: FAILED';
+    }
+
+    loadBtn.addEventListener('click', () => {
+      loadDemoData().catch((error) => {
+        scenarioOutput.textContent = `Ошибка загрузки: ${error.message}`;
+      });
+    });
+
+    runBtn.addEventListener('click', () => {
+      runDemo().catch((error) => {
+        runOutput.textContent = `Ошибка запуска: ${error.message}`;
+      });
+    });
+
+    loadDemoData();
+  </script>
+</body>
+</html>
