@@ -8,30 +8,19 @@ const execAsync = promisify(exec);
 
 describe('Scenarios API', () => {
   const dbPath = path.join(__dirname, '..', 'test.db');
-  const tsxPath = path.join(__dirname, '..', 'node_modules', '.bin', 'tsx.cmd');
+  const tsxBin = process.platform === 'win32' ? 'tsx.cmd' : 'tsx';
+  const tsxPath = path.join(__dirname, '..', 'node_modules', '.bin', tsxBin);
   const scriptPath = path.join(__dirname, '..', 'src', 'web', 'scenarios-api.ts');
   
   beforeAll(async () => {
     // Устанавливаем переменную окружения для тестовой БД
     process.env.DATABASE_URL = `file:${dbPath}`;
-    
-    // Создаем базу данных и применяем миграции
-    try {
-      await execAsync(`npx prisma migrate deploy`, {
-        cwd: path.join(__dirname, '..'),
-        env: { ...process.env, DATABASE_URL: `file:${dbPath}` }
-      });
-    } catch (e) {
-      // Если миграции не применены, пробуем создать БД через migrate dev
-      try {
-        await execAsync(`npx prisma migrate dev --name init`, {
-          cwd: path.join(__dirname, '..'),
-          env: { ...process.env, DATABASE_URL: `file:${dbPath}` }
-        });
-      } catch (e2) {
-        // Игнорируем ошибки, возможно БД уже создана
-      }
-    }
+
+    // Синхронизируем схему с тестовой БД без миграций
+    await execAsync(`npx prisma db push --skip-generate`, {
+      cwd: path.join(__dirname, '..'),
+      env: { ...process.env, DATABASE_URL: `file:${dbPath}` }
+    });
   });
 
   afterAll(() => {
