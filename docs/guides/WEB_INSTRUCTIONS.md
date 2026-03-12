@@ -1,57 +1,79 @@
 # 🌐 Инструкция по запуску веб-интерфейса
 
+## Два варианта сервера
+
+| Команда | Файл | Назначение |
+|--------|------|------------|
+| `npm run web` | `src/web/server.ts` | Лёгкий сервер: главная, админка, demo-e2e, статика, API-заглушки |
+| `node server.cjs` | `server.cjs` | Полный сервер: Agent Runtime, сценарии, очереди, eval, БД, все API |
+
+Для теста агента на `/test-agent.html` нужен **node server.cjs**. При `npm run web` страница покажет подсказку «Запустите node server.cjs».
+
 ## Быстрый запуск
 
-### Вариант 1: Через PowerShell скрипт (Windows)
-
-```powershell
-.\start-web.ps1
-```
-
-### Вариант 2: Через npm команду
+### Вариант 1: Лёгкий сервер (рекомендуется для разработки UI)
 
 ```bash
 npm run web
 ```
 
-### Вариант 3: Напрямую через npx
+Порт по умолчанию **3000**. Задать другой порт:
+
+- **PowerShell:** `$env:PORT=3001; npm run web`
+- **Linux/macOS:** `PORT=3001 npm run web`
+
+### Вариант 2: Полный сервер (агент, сценарии, очереди)
 
 ```bash
-npx tsx src/web/simple-server.ts
+node server.cjs
 ```
 
-## После запуска
+Сервер слушает порт 3000 и выводит в консоль список URL.
 
-1. Откройте браузер
-2. Перейдите по адресу: **http://localhost:3000**
-3. Вы увидите dashboard с информацией о:
-   - Статусе всех компонентов системы
-   - Результатах тестов
-   - Времени последнего изменения файлов
+### Вариант 3: Через PowerShell скрипт (Windows)
 
-## Функции веб-интерфейса
+```powershell
+.\start-web.ps1
+```
 
-- ✅ **Автообновление** - данные обновляются каждые 5 секунд
-- ✅ **Кнопка обновления** - ручное обновление данных
-- ✅ **Статус компонентов** - визуальное отображение состояния
-- ✅ **Информация о тестах** - какие тесты готовы к запуску
+## Главная страница
 
-## Если сервер не запускается
+После запуска откройте **http://localhost:3000** (или http://localhost:PORT).
 
-1. Убедитесь, что порт 3000 свободен:
+На главной две кнопки:
+
+- **Админский интерфейс** → `/admin-dashboard.html`
+- **Демо сквозного теста** → `/demo-e2e.html`
+
+## Основные страницы
+
+- `/` — главная (точка входа)
+- `/admin-dashboard.html` — админ-дашборд
+- `/admin-testing.html` — eval-кейсы
+- `/admin-templates.html` — шаблоны сценариев
+- `/admin-scenarios.html` — сценарии
+- `/admin-monitoring.html` — мониторинг
+- `/demo-e2e.html` — демо сквозного теста
+- `/test-agent.html` — тест Agent Runtime (полный функционал при `node server.cjs`)
+- `/observability-dashboard.html` — observability
+
+## Если порт 3000 занят
+
+1. Освободить порт (PowerShell):
    ```powershell
-   netstat -ano | findstr :3000
+   Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
    ```
 
-2. Если порт занят, измените PORT в файле `src/web/simple-server.ts`
-
-3. Проверьте установку зависимостей:
-   ```bash
-   npm install
+2. Либо запустить на другом порту:
+   ```powershell
+   $env:PORT=3001; npm run web
    ```
+   Затем открыть http://localhost:3001
 
-## Структура веб-интерфейса
+## Зависимости
 
-- `/` - главная страница с dashboard
-- `/api/status` - JSON API со статусом компонентов
-- `/api/test-results` - JSON API с результатами тестов
+```bash
+npm install
+```
+
+Для полного сервера (`node server.cjs`) могут понадобиться БД (Prisma), Ollama (для агента) и т.д. — см. документацию по компонентам.

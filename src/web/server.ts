@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 interface TestResult {
   name: string;
@@ -154,6 +154,33 @@ const server = createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify({ success: true, result: runDemoScenario() }));
+  } else if (pathname === '/api/agent/status') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      ollamaAvailable: false,
+      model: null,
+      modulesLoaded: false,
+      hint: 'Для работы агента запустите полный сервер: node server.cjs'
+    }));
+  } else if (pathname === '/api/agent/execute' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        success: false,
+        error: {
+          code: 'USE_FULL_SERVER',
+          message: 'Для запуска агента используйте полный сервер: node server.cjs'
+        },
+        output: 'Текущий режим (npm run web) не запускает Agent Runtime.\n\nВ терминале из корня проекта выполните:\n  node server.cjs\n\nЗатем откройте снова: http://localhost:3000/test-agent.html',
+        toolCallsExecuted: 0,
+        totalTokens: 0
+      }));
+    });
+    return;
   } else if (pathname.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(404);

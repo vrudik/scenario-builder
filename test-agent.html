@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -351,6 +351,8 @@
                     const data = await response.json();
                     if (data.ollamaAvailable) {
                         showStatus('✅ Ollama доступен, модель: ' + data.model, 'success');
+                    } else if (data.hint) {
+                        showStatus('⚠️ Агент не запущен. ' + data.hint, 'error');
                     } else {
                         showStatus('⚠️ Ollama недоступен. Убедитесь, что Ollama запущен.', 'error');
                     }
@@ -363,7 +365,7 @@
                     if (window.location.protocol === 'file:') {
                         message = '⚠️ Страница открыта напрямую (file://). Откройте через сервер: http://localhost:3000/test-agent.html';
                     } else {
-                        message = '⚠️ Сервер не запущен или недоступен. Запустите сервер: node server.cjs';
+                        message = '⚠️ Сервер не запущен или недоступен. Запустите полный сервер для агента: node server.cjs';
                     }
                 } else {
                     message = window.location.protocol === 'file:' 

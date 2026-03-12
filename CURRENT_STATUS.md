@@ -69,13 +69,25 @@
 
 ### Важно для следующего этапа (Should have):
 
-4. **Template Library** ❌
+4. **Template Library** ✅
    - ТЗ требует: "Template Library: библиотека шаблонов сценариев (saga, approval, async callbacks, CRM-сценарий, antifraud и т. д.)"
-   - Приоритет: **СРЕДНИЙ**
+   - Текущее состояние: ✅ Реализовано
+     - Библиотека шаблонов с 5 встроенными шаблонами (saga, approval, async-callbacks, crm, antifraud)
+     - API для работы с шаблонами (list, get, search, apply)
+     - Поддержка параметризации шаблонов
+     - Категоризация и тегирование шаблонов
+     - Веб-интерфейс для просмотра и применения шаблонов (admin-templates.html)
 
-5. **Eval-кейсы** ❌
+5. **Eval-кейсы** ✅
    - ТЗ требует: "LLM eval (в т. ч. на prompt injection/безопасность)"
-   - Приоритет: **СРЕДНИЙ**
+   - Текущее состояние: ✅ Реализовано
+     - Библиотека eval-кейсов с 22+ тестовыми кейсами
+     - Категории: Prompt Injection, System Prompt Leakage, Jailbreak, Insecure Output, Excessive Agency, Data Leakage, Role Playing
+     - Eval Runner для запуска кейсов и проверки результатов
+     - API для работы с eval-кейсами (list, get, search, run-case, run-suite)
+     - Веб-интерфейс для просмотра и запуска eval-кейсов (admin-testing.html)
+     - Интеграция с GuardrailsManager и AgentRuntime
+     - Тесты для проверки функциональности
 
 6. **Policy Engine (OPA)** ❌
    - ТЗ требует: "Policy Engine: централизованные политики (allow/deny, approvals, PII-маскирование, cost-guard)"
@@ -122,8 +134,25 @@
 6. Policy Engine (OPA)
 7. Multi-tenant поддержка
 
+## 🌐 Веб-интерфейс и точка входа
+
+- **Главная страница** (`/`): кнопки «Админский интерфейс» и «Демо сквозного теста» (и в `server.cjs`, и в `src/web/server.ts`).
+- **Два способа запуска:**
+  - `npm run web` — лёгкий сервер (`src/web/server.ts`), порт через `PORT` (по умолчанию 3000).
+  - `node server.cjs` — полный сервер с Agent Runtime, сценариями, очередями, eval, админкой.
+- **demo-e2e.html** и **test-agent.html** работают при обоих вариантах; для полного агента нужен `node server.cjs`.
+- Исправлена синтаксическая ошибка в `server.cjs` (блок `/api/queues` и закрытие callback `req.on('end')`).
+
+## 📝 Чеклист недавних изменений
+
+- [x] Исправление синтаксиса server.cjs (закрытие req.on, блок queues/scenarios)
+- [x] Главная страница: две кнопки (Админка + Демо) в server.cjs и server.ts
+- [x] PORT из переменной окружения в server.ts (`process.env.PORT || 3000`)
+- [x] API-заглушки для test-agent в server.ts с подсказкой «запустите node server.cjs»
+- [x] demo-e2e: поддержка в server.cjs и обработка ошибок в demo-e2e.html
+
 ## 📝 Текущие проблемы
 
 1. ✅ Исправлено: "Action node missing toolId" при выборе action-agent workflow
-2. ⚠️ Нужно: Event Bus для event-driven архитектуры
+2. ✅ Реализовано: Event Bus (Kafka) с graceful degradation
 3. ⚠️ Нужно: Temporal для durable execution

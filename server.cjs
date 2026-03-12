@@ -248,7 +248,8 @@ const server = http.createServer(async (req, res) => {
     }
     h1 { font-size: 1.75rem; margin-bottom: 8px; font-weight: 600; }
     p { color: rgba(255,255,255,0.85); margin-bottom: 32px; font-size: 1rem; }
-    a {
+    .actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+    .btn-admin {
       display: inline-block;
       padding: 16px 32px;
       background: #3b82f6;
@@ -260,13 +261,18 @@ const server = http.createServer(async (req, res) => {
       box-shadow: 0 4px 14px rgba(59,130,246,0.4);
       transition: background .2s, transform .1s;
     }
-    a:hover { background: #2563eb; transform: translateY(-1px); }
+    .btn-admin:hover { background: #2563eb; transform: translateY(-1px); }
+    .btn-demo { background: #0ea5e9; box-shadow: 0 4px 14px rgba(14,165,233,0.45); }
+    .btn-demo:hover { background: #0284c7; }
   </style>
 </head>
 <body>
   <h1>Конструктор сценариев</h1>
   <p>Платформа автономных сценариев и агентных процессов</p>
-  <a href="/admin-dashboard.html">Админский интерфейс</a>
+  <div class="actions">
+    <a href="/admin-dashboard.html" class="btn-admin">Админский интерфейс</a>
+    <a href="/demo-e2e.html" class="btn-admin btn-demo">Демо сквозного теста</a>
+  </div>
 </body>
 </html>`;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -1646,10 +1652,10 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
             error: { code: 'INTERNAL_ERROR', message: error.message }
           }));
         }
-      });
+      }
+      );
       return;
-    }
-    
+  } else if (pathname.startsWith('/api/scenarios')) {
     // API для работы со сценариями через БД
     console.log('[DEBUG] Scenarios API request:', req.method, pathname);
     const { exec } = require('child_process');
