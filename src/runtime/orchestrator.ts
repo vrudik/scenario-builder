@@ -487,6 +487,19 @@ export class Orchestrator {
     state: WorkflowExecutionState,
     result: NodeExecutionResult
   ): Promise<NodeExecutionResult> {
+    const toolId = node.toolId;
+    const tool = toolId && this.registry ? this.registry.get(toolId) : undefined;
+
+    if (!toolId || !tool) {
+      result.state = NodeExecutionState.FAILED;
+      result.error = {
+        code: 'TOOL_NOT_REGISTERED',
+        message: `Tool ${toolId || 'unknown'} is not registered`
+      };
+      result.completedAt = new Date();
+      return result;
+    }
+
     const maxRetries = node.retry?.maxAttempts || 3;
     const initialDelay = node.retry?.initialDelay || 1000;
 
@@ -506,61 +519,13 @@ export class Orchestrator {
 
         // Создание запроса (в реальной системе здесь будет получение inputs из предыдущих узлов)
         const request: ToolRequest = {
-          toolId: node.toolId!,
+          toolId,
           inputs: {}, // TODO: получить из предыдущих узлов
           context: requestContext
         };
 
-        // Получение инструмента из registry (в реальной системе через dependency injection)
-        // Здесь используем заглушку
-        const tool: RegisteredTool = {
-          id: node.toolId!,
-          name: node.toolId!,
-          version: '1.0.0',
-          riskClass: 'low' as any,
-          requiresApproval: false,
-          inputOutput: {
-            inputs: {},
-            outputs: {}
-          },
-          sla: {
-            availability: 0.99,
-            latency: { p50: 100, p95: 500, p99: 1000 },
-            maxRetries: 3
-          },
-          authorization: {
-            scopes: [],
-            roles: [],
-            requiresApproval: false
-          },
-          idempotency: {
-            supported: true
-          },
-          metadata: {
-            version: '1.0.0',
-            registeredAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            provider: 'default'
-          }
-        };
-
         // Выполнение через gateway
-        const response = await this.gateway.execute(
-          request,
-          tool,
-          async (req) => {
-            // В реальной системе здесь будет вызов реального инструмента
-            // Для примера возвращаем успешный ответ
-            return {
-              success: true,
-              outputs: { result: 'success' },
-              metadata: {
-                latency: 100,
-                timestamp: new Date().toISOString()
-              }
-            };
-          }
-        );
+        const response = await this.gateway.execute(request, tool);
 
         if (response.success) {
           result.state = NodeExecutionState.COMPLETED;

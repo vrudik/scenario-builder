@@ -207,27 +207,28 @@ export class ToolGateway {
     tool: RegisteredTool,
     executor?: (req: ToolRequest) => Promise<ToolResponse>
   ): Promise<ToolResponse> {
-    // Если executor не передан, пытаемся получить из зарегистрированных
-      if (!executor) {
-        executor = this.getExecutor(tool.id);
-        if (!executor) {
-          const latency = Date.now() - startTime;
-          return {
-            success: false,
-            error: {
-              code: 'EXECUTOR_NOT_FOUND',
-              message: `No executor registered for tool: ${tool.id}`
-            },
-            metadata: {
-              latency,
-              timestamp: new Date().toISOString(),
-              traceId: request.context.traceId,
-              spanId: request.context.spanId
-            }
-          };
-        }
-      }
     const startTime = Date.now();
+
+    // Если executor не передан, пытаемся получить из зарегистрированных
+    if (!executor) {
+      executor = this.getExecutor(tool.id);
+      if (!executor) {
+        const latency = Date.now() - startTime;
+        return {
+          success: false,
+          error: {
+            code: 'EXECUTOR_NOT_FOUND',
+            message: `No executor registered for tool: ${tool.id}`
+          },
+          metadata: {
+            latency,
+            timestamp: new Date().toISOString(),
+            traceId: request.context.traceId,
+            spanId: request.context.spanId
+          }
+        };
+      }
+    }
 
     // Проверка политики доступа
     if (!this.checkAccess(request, tool)) {
