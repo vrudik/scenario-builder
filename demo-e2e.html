@@ -127,26 +127,44 @@
     const statusLine = document.getElementById('statusLine');
 
     async function loadDemoData() {
-      const response = await fetch('/api/demo-e2e');
-      const data = await response.json();
-
-      scenarioOutput.textContent = JSON.stringify(data.scenario, null, 2);
-      instructionList.innerHTML = '';
-      data.instructions.forEach((item) => {
-        const li = document.createElement('li');
-        li.textContent = item;
-        instructionList.appendChild(li);
-      });
+      try {
+        const response = await fetch('/api/demo-e2e');
+        const data = await response.json();
+        if (!response.ok || !data.scenario) {
+          scenarioOutput.textContent = 'API недоступен (ответ: ' + response.status + '). Запустите сервер: npm run web или node server.cjs';
+          instructionList.innerHTML = '<li>Запустите проект из корня: <code>npm run web</code> или <code>node server.cjs</code></li>';
+          return;
+        }
+        scenarioOutput.textContent = JSON.stringify(data.scenario, null, 2);
+        instructionList.innerHTML = '';
+        (data.instructions || []).forEach((item) => {
+          const li = document.createElement('li');
+          li.textContent = item;
+          instructionList.appendChild(li);
+        });
+      } catch (e) {
+        scenarioOutput.textContent = 'Ошибка загрузки: ' + e.message + '. Убедитесь, что открываете страницу через http://localhost:3000/demo-e2e.html (сервер запущен).';
+      }
     }
 
     async function runDemo() {
       statusLine.textContent = 'Статус: выполняется...';
-      const response = await fetch('/api/demo-e2e/run');
-      const data = await response.json();
-      runOutput.textContent = JSON.stringify(data.result, null, 2);
-      statusLine.innerHTML = data.result.status === 'passed'
-        ? '<span class="passed">Статус: PASSED</span>'
-        : 'Статус: FAILED';
+      try {
+        const response = await fetch('/api/demo-e2e/run');
+        const data = await response.json();
+        if (!response.ok || !data.result) {
+          runOutput.textContent = 'API недоступен (ответ: ' + response.status + '). Запустите сервер: npm run web или node server.cjs';
+          statusLine.textContent = 'Статус: ошибка API';
+          return;
+        }
+        runOutput.textContent = JSON.stringify(data.result, null, 2);
+        statusLine.innerHTML = data.result.status === 'passed'
+          ? '<span class="passed">Статус: PASSED</span>'
+          : 'Статус: FAILED';
+      } catch (e) {
+        runOutput.textContent = 'Ошибка запуска: ' + e.message;
+        statusLine.textContent = 'Статус: ошибка';
+      }
     }
 
     loadBtn.addEventListener('click', () => {
