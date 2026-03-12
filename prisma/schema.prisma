@@ -26,6 +26,7 @@ model Scenario {
   executions  Execution[]
   templates   Template[]
   jobs        ScenarioJob[]
+  triggers    QueueTrigger[]
   
   @@index([status])
   @@index([createdAt])
@@ -190,6 +191,27 @@ model Configuration {
   @@index([key])
 }
 
+// Аудит (единый журнал событий безопасности и исполнения)
+model AuditLog {
+  id          String   @id @default(uuid())
+  action      String   // scenario_started, scenario_completed, agent_execution, tool_call, guardrail_violation, eval_case, etc.
+  actor       String?  // userId или service name
+  resource    String?  // scenarioId, executionId, toolId
+  outcome     String   @default("success") // success, failure, blocked, modified
+  severity    String   @default("info")    // info, warning, error, critical
+  message     String?
+  details     String?  // JSON дополнительная нагрузка
+  traceId     String?
+  spanId      String?
+  timestamp   DateTime @default(now())
+
+  @@index([action])
+  @@index([actor])
+  @@index([resource])
+  @@index([outcome])
+  @@index([timestamp])
+}
+
 // Метрики (для истории)
 model Metric {
   id          String   @id @default(uuid())
@@ -227,6 +249,7 @@ model ScenarioQueue {
 model QueueTrigger {
   id          String   @id @default(uuid())
   queueId     String
+  scenarioId  String?  // ID сценария для автоматического создания задания (опционально)
   eventType   String   // тип события для подписки
   topic       String   // Kafka topic
   filter      String?  // JSON фильтр для событий (опционально)
@@ -235,8 +258,10 @@ model QueueTrigger {
   updatedAt   DateTime @updatedAt
   
   queue       ScenarioQueue @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  scenario    Scenario?     @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
   
   @@index([queueId])
+  @@index([scenarioId])
   @@index([eventType])
   @@index([topic])
   @@index([enabled])

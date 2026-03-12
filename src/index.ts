@@ -7,3 +7,6 @@ export * from './builder';
 export * from './registry';
 export * from './gateway';
 export * from './runtime';
+export * from './templates';
+export * from './eval';
+export * from './audit';

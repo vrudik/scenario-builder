@@ -10,6 +10,7 @@
 
 import { RegisteredTool } from '../registry';
 import { ExecutionPolicy } from '../builder';
+import type { AuditService } from '../audit/audit-service';
 
 /**
  * Контекст запроса к инструменту
@@ -157,12 +158,20 @@ export class ToolGateway {
   private policy?: ExecutionPolicy;
   private sandboxMode: boolean = false;
   private toolExecutors: Map<string, (req: ToolRequest) => Promise<ToolResponse>> = new Map();
+  private auditService?: AuditService;
 
   /**
    * Установка политики исполнения
    */
   setPolicy(policy: ExecutionPolicy): void {
     this.policy = policy;
+  }
+
+  /**
+   * Установка сервиса аудита для логирования вызовов инструментов
+   */
+  setAuditService(service: AuditService): void {
+    this.auditService = service;
   }
 
   /**
@@ -199,25 +208,40 @@ export class ToolGateway {
     executor?: (req: ToolRequest) => Promise<ToolResponse>
   ): Promise<ToolResponse> {
     // Если executor не передан, пытаемся получить из зарегистрированных
-    if (!executor) {
-      executor = this.getExecutor(tool.id);
       if (!executor) {
-        return {
-          success: false,
-          error: {
-            code: 'EXECUTOR_NOT_FOUND',
-            message: `No executor registered for tool: ${tool.id}`
-          },
-          metadata: {
-            timestamp: new Date().toISOString()
-          }
-        };
+        executor = this.getExecutor(tool.id);
+        if (!executor) {
+          const latency = Date.now() - startTime;
+          return {
+            success: false,
+            error: {
+              code: 'EXECUTOR_NOT_FOUND',
+              message: `No executor registered for tool: ${tool.id}`
+            },
+            metadata: {
+              latency,
+              timestamp: new Date().toISOString(),
+              traceId: request.context.traceId,
+              spanId: request.context.spanId
+            }
+          };
+        }
       }
-    }
     const startTime = Date.now();
 
     // Проверка политики доступа
     if (!this.checkAccess(request, tool)) {
+      void this.auditService?.logToolCall({
+        action: 'tool_call_denied',
+        toolId: request.toolId,
+        executionId: request.context.executionId,
+        scenarioId: request.context.scenarioId,
+        userId: request.context.userId,
+        outcome: 'failure',
+        message: 'Access denied by policy',
+        traceId: request.context.traceId,
+        spanId: request.context.spanId,
+      });
       return {
         success: false,
         error: {
@@ -270,6 +294,17 @@ export class ToolGateway {
 
     // Sandbox режим - возвращаем заглушку
     if (this.sandboxMode) {
+      void this.auditService?.logToolCall({
+        action: 'tool_call_completed',
+        toolId: request.toolId,
+        executionId: request.context.executionId,
+        scenarioId: request.context.scenarioId,
+        userId: request.context.userId,
+        outcome: 'success',
+        message: 'Sandbox mode',
+        traceId: request.context.traceId,
+        spanId: request.context.spanId,
+      });
       return {
         success: true,
         outputs: {},
@@ -282,14 +317,46 @@ export class ToolGateway {
       };
     }
 
+    void this.auditService?.logToolCall({
+      action: 'tool_call_started',
+      toolId: request.toolId,
+      executionId: request.context.executionId,
+      scenarioId: request.context.scenarioId,
+      userId: request.context.userId,
+      traceId: request.context.traceId,
+      spanId: request.context.spanId,
+    });
+
     // Выполнение запроса
     try {
       const response = await executor(request);
 
       if (response.success) {
         circuitBreaker.recordSuccess();
+        void this.auditService?.logToolCall({
+          action: 'tool_call_completed',
+          toolId: request.toolId,
+          executionId: request.context.executionId,
+          scenarioId: request.context.scenarioId,
+          userId: request.context.userId,
+          outcome: 'success',
+          details: { latency: Date.now() - startTime },
+          traceId: request.context.traceId,
+          spanId: request.context.spanId,
+        });
       } else {
         circuitBreaker.recordFailure();
+        void this.auditService?.logToolCall({
+          action: 'tool_call_failed',
+          toolId: request.toolId,
+          executionId: request.context.executionId,
+          scenarioId: request.context.scenarioId,
+          userId: request.context.userId,
+          outcome: 'failure',
+          message: response.error?.message,
+          traceId: request.context.traceId,
+          spanId: request.context.spanId,
+        });
       }
 
       return {
@@ -303,6 +370,17 @@ export class ToolGateway {
       };
     } catch (error) {
       circuitBreaker.recordFailure();
+      void this.auditService?.logToolCall({
+        action: 'tool_call_failed',
+        toolId: request.toolId,
+        executionId: request.context.executionId,
+        scenarioId: request.context.scenarioId,
+        userId: request.context.userId,
+        outcome: 'failure',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        traceId: request.context.traceId,
+        spanId: request.context.spanId,
+      });
       return {
         success: false,
         error: {

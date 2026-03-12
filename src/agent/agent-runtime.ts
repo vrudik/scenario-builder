@@ -19,6 +19,7 @@ import { RegisteredTool } from '../registry';
 import { ScenarioSpec } from '../spec';
 import { traceAsync, addSpanAttributes, addSpanEvent, systemMetrics } from '../observability';
 import { getLogger } from '../observability/logger';
+import type { AuditService } from '../audit/audit-service';
 
 /**
  * Конфигурация LLM
@@ -109,6 +110,7 @@ export class AgentRuntime {
   private costManager: CostManager;
   private gateway: ToolGateway;
   private llmConfig: LLMConfig;
+  private auditService?: AuditService;
   private logger = getLogger({ serviceName: 'agent-runtime' });
 
   constructor(
@@ -149,6 +151,15 @@ export class AgentRuntime {
           if (!promptCheck.allowed) {
             addSpanEvent('guardrail.violation', { reason: promptCheck.reason || 'unknown' });
             systemMetrics.scenarioFailures.add(1, { reason: 'guardrail_violation' });
+            void this.auditService?.logGuardrailBlocked({
+              kind: 'prompt',
+              reason: promptCheck.reason,
+              riskType: promptCheck.riskType,
+              scenarioId: context.scenarioId,
+              executionId: context.executionId,
+              traceId: context.traceId,
+              spanId: context.spanId,
+            });
             return {
               success: false,
               toolCallsExecuted: 0,
@@ -159,6 +170,14 @@ export class AgentRuntime {
               }
             };
           }
+
+          void this.auditService?.logAgentStarted({
+            scenarioId: context.scenarioId,
+            executionId: context.executionId,
+            userId: context.userId,
+            traceId: context.traceId,
+            spanId: context.spanId,
+          });
 
           // 3. Получение контекста из памяти
           const memoryContext = this.getMemoryContext(context);
@@ -201,6 +220,18 @@ export class AgentRuntime {
             duration,
           });
 
+          void this.auditService?.logAgentCompleted({
+            scenarioId: context.scenarioId,
+            executionId: context.executionId,
+            userId: context.userId,
+            success: result.success,
+            toolCallsExecuted: result.toolCallsExecuted,
+            totalTokens: result.totalTokens,
+            errorCode: result.error?.code,
+            traceId: context.traceId,
+            spanId: context.spanId,
+          });
+
           return result;
         } catch (error) {
           // Fallback на deterministic workflow при ошибках
@@ -208,6 +239,15 @@ export class AgentRuntime {
           this.logger.error('Agent execution failed', error, {
             scenarioId: context.scenarioId,
             executionId: context.executionId,
+          });
+          void this.auditService?.logAgentCompleted({
+            scenarioId: context.scenarioId,
+            executionId: context.executionId,
+            userId: context.userId,
+            success: false,
+            errorCode: 'EXECUTION_ERROR',
+            traceId: context.traceId,
+            spanId: context.spanId,
           });
           return {
             success: false,
@@ -677,6 +717,13 @@ Do not just return tool call JSON - always follow up with a natural language exp
         }
       });
     }
+  }
+
+  /**
+   * Установка сервиса аудита для логирования выполнений и guardrails
+   */
+  setAuditService(service: AuditService): void {
+    this.auditService = service;
   }
 
   /**

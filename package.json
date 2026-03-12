@@ -13,6 +13,7 @@
     "example:event-bus": "tsx examples/event-bus-example.ts",
     "test": "vitest",
     "test:manual": "tsx test-manual.ts",
+    "audit:find": "tsx src/web/audit-api.ts find",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
     "web": "tsx src/web/server.ts",

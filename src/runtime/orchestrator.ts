@@ -17,6 +17,8 @@ import { RegisteredTool, ToolRegistry } from '../registry';
 import { AgentRuntime, AgentExecutionContext, LLMConfig } from '../agent/agent-runtime';
 import { IEventBus, BaseEvent, createEvent } from '../events';
 import { ExecutionRepository, NodeExecutionRepository } from '../db/repositories';
+import { TemporalClient } from './temporal-client';
+import type { AuditService } from '../audit/audit-service';
 
 /**
  * Контекст выполнения сценария
@@ -98,6 +100,9 @@ export class Orchestrator {
   private eventBus?: IEventBus;
   private executionRepository?: ExecutionRepository;
   private nodeExecutionRepository?: NodeExecutionRepository;
+  private temporalClient?: TemporalClient;
+  private auditService?: AuditService;
+  private useTemporal: boolean = false;
   private executionStates: Map<string, WorkflowExecutionState> = new Map();
   private eventHistory: Map<string, WorkflowEvent[]> = new Map();
 
@@ -107,7 +112,8 @@ export class Orchestrator {
     registry?: ToolRegistry,
     eventBus?: IEventBus,
     executionRepository?: ExecutionRepository,
-    nodeExecutionRepository?: NodeExecutionRepository
+    nodeExecutionRepository?: NodeExecutionRepository,
+    temporalClient?: TemporalClient
   ) {
     this.gateway = gateway;
     this.agentRuntime = agentRuntime;
@@ -115,6 +121,8 @@ export class Orchestrator {
     this.eventBus = eventBus;
     this.executionRepository = executionRepository;
     this.nodeExecutionRepository = nodeExecutionRepository;
+    this.temporalClient = temporalClient;
+    this.useTemporal = temporalClient !== undefined;
   }
 
   /**
@@ -132,9 +140,98 @@ export class Orchestrator {
   }
 
   /**
+   * Установка Temporal Client для durable execution
+   */
+  setTemporalClient(temporalClient: TemporalClient): void {
+    this.temporalClient = temporalClient;
+    this.useTemporal = true;
+  }
+
+  /**
+   * Установка сервиса аудита для логирования сценариев
+   */
+  setAuditService(service: AuditService): void {
+    this.auditService = service;
+  }
+
+  /**
    * Запуск выполнения сценария
    */
   async startExecution(context: ExecutionContext): Promise<string> {
+    const executionId = context.executionId;
+    
+    // Если Temporal доступен, используем его для durable execution
+    if (this.useTemporal && this.temporalClient) {
+      return await this.startTemporalExecution(context);
+    }
+    
+    // Иначе используем обычное выполнение (in-memory)
+    return await this.startInMemoryExecution(context);
+  }
+
+  /**
+   * Запуск выполнения через Temporal (durable execution)
+   */
+  private async startTemporalExecution(context: ExecutionContext): Promise<string> {
+    const executionId = context.executionId;
+    
+    // Сохранение выполнения в БД
+    if (this.executionRepository) {
+      try {
+        await this.executionRepository.create({
+          executionId,
+          scenarioId: context.scenarioId,
+          userId: context.userId,
+          userRoles: context.userRoles,
+          traceId: context.traceId,
+          spanId: context.spanId,
+        });
+      } catch (error) {
+        console.warn(`[Orchestrator] Failed to save execution to DB:`, error);
+      }
+    }
+
+    // Запуск workflow через Temporal
+    try {
+      await this.temporalClient!.startScenarioWorkflow(
+        executionId,
+        context.workflowGraph,
+        context.spec,
+        {
+          executionId: context.executionId,
+          scenarioId: context.scenarioId,
+          userId: context.userId,
+          userRoles: context.userRoles,
+          traceId: context.traceId,
+          spanId: context.spanId,
+          input: {},
+        }
+      );
+
+      // Публикация события запуска
+      if (this.eventBus) {
+        await this.eventBus.publish('scenario-execution', createEvent({
+          type: 'scenario.started',
+          metadata: {
+            executionId,
+            scenarioId: context.scenarioId,
+            userId: context.userId,
+          },
+        }));
+      }
+
+      return executionId;
+    } catch (error) {
+      console.error(`[Orchestrator] Failed to start Temporal workflow:`, error);
+      // Fallback на in-memory выполнение
+      return await this.startInMemoryExecution(context);
+    }
+  }
+
+  /**
+   * Запуск выполнения в памяти (без Temporal)
+   */
+  private async startInMemoryExecution(context: ExecutionContext): Promise<string> {
     const executionId = context.executionId;
     
     // Сохранение выполнения в БД, если репозиторий доступен
@@ -172,6 +269,14 @@ export class Orchestrator {
       type: 'trigger',
       executionId,
       timestamp: new Date()
+    });
+
+    void this.auditService?.logScenarioStarted({
+      scenarioId: context.scenarioId,
+      executionId: context.executionId,
+      userId: context.userId,
+      traceId: context.traceId,
+      spanId: context.spanId,
     });
 
     // Начало выполнения workflow
@@ -226,12 +331,26 @@ export class Orchestrator {
         if (nextNodeId === 'end') {
           state.completed = true;
           state.currentNodeId = 'end';
+          void this.auditService?.logScenarioCompleted({
+            scenarioId: context.scenarioId,
+            executionId: context.executionId,
+            userId: context.userId,
+            traceId: context.traceId,
+            spanId: context.spanId,
+          });
         } else if (nextNodeId) {
           state.currentNodeId = nextNodeId;
           // Рекурсивно продолжаем выполнение
           await this.executeWorkflow(context, state);
         } else {
           state.completed = true;
+          void this.auditService?.logScenarioCompleted({
+            scenarioId: context.scenarioId,
+            executionId: context.executionId,
+            userId: context.userId,
+            traceId: context.traceId,
+            spanId: context.spanId,
+          });
         }
       } else {
         // Узел завершился с ошибкой - запускаем компенсацию
@@ -241,6 +360,15 @@ export class Orchestrator {
           code: 'NODE_EXECUTION_FAILED',
           message: result.error?.message || 'Node execution failed'
         };
+        void this.auditService?.logScenarioFailed({
+          scenarioId: context.scenarioId,
+          executionId: context.executionId,
+          userId: context.userId,
+          errorCode: state.error.code,
+          errorMessage: state.error.message,
+          traceId: context.traceId,
+          spanId: context.spanId,
+        });
       }
     } catch (error) {
       // Критическая ошибка - запускаем компенсацию
@@ -251,13 +379,23 @@ export class Orchestrator {
         message: error instanceof Error ? error.message : 'Unknown error'
       };
       
+      void this.auditService?.logScenarioFailed({
+        scenarioId: context.scenarioId,
+        executionId: context.executionId,
+        userId: context.userId,
+        errorCode: state.error?.code,
+        errorMessage: state.error?.message,
+        traceId: context.traceId,
+        spanId: context.spanId,
+      });
+
       // Обновляем статус выполнения в БД
       if (this.executionRepository) {
         try {
           await this.executionRepository.updateStatus(context.executionId, {
             status: 'failed',
-            errorMessage: state.error.message,
-            errorCode: state.error.code,
+            errorMessage: state.error?.message,
+            errorCode: state.error?.code,
           });
         } catch (dbError) {
           console.warn(`[Orchestrator] Failed to update execution status in DB:`, dbError);
