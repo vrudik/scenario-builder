@@ -48,19 +48,17 @@ export class NodeExecutionRepository {
       }
       if (input.state === 'completed' || input.state === 'failed') {
         updateData.completedAt = new Date();
-        if (updateData.startedAt) {
-          const started = await prisma.nodeExecution.findUnique({
-            where: {
-              executionId_nodeId: {
-                executionId,
-                nodeId,
-              },
+        const started = await prisma.nodeExecution.findUnique({
+          where: {
+            executionId_nodeId: {
+              executionId,
+              nodeId,
             },
-            select: { startedAt: true },
-          });
-          if (started?.startedAt) {
-            updateData.duration = new Date().getTime() - started.startedAt.getTime();
-          }
+          },
+          select: { startedAt: true },
+        });
+        if (started?.startedAt) {
+          updateData.duration = new Date().getTime() - started.startedAt.getTime();
         }
       }
     }
