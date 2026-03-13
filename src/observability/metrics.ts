@@ -8,7 +8,7 @@
  * - Экспорт в Prometheus
  */
 
-import { metrics, Meter, Counter, Histogram, UpDownCounter, ObservableGauge } from '@opentelemetry/api';
+import { metrics, Meter, Counter, Histogram, UpDownCounter } from '@opentelemetry/api';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { resourceFromAttributes } from '@opentelemetry/resources';

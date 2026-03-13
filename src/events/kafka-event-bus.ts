@@ -8,8 +8,8 @@
  * - Партиционирование для масштабирования
  */
 
-import { Kafka, Producer, Consumer, KafkaMessage, logLevel } from 'kafkajs';
-import { IEventBus, BaseEvent, EventBusConfig, PublishOptions, SubscribeOptions, EventHandler } from './event-bus';
+import { Kafka, Producer, Consumer, logLevel } from 'kafkajs';
+import { IEventBus, BaseEvent, EventBusConfig, PublishOptions, SubscribeOptions } from './event-bus';
 import { randomUUID } from 'crypto';
 
 export class KafkaEventBus implements IEventBus {
@@ -69,7 +69,7 @@ export class KafkaEventBus implements IEventBus {
       }
 
       // Отключаем всех consumers
-      for (const [groupId, consumer] of this.consumers.entries()) {
+      for (const [, consumer] of this.consumers.entries()) {
         await consumer.disconnect();
       }
       this.consumers.clear();
@@ -93,22 +93,24 @@ export class KafkaEventBus implements IEventBus {
 
     try {
       // Формируем сообщение для Kafka
-      const message: KafkaMessage = {
-        key: options.key || event.metadata.eventId,
-        value: JSON.stringify({
+      const message = {
+        key: Buffer.from(options.key || event.metadata.eventId),
+        value: Buffer.from(JSON.stringify({
           type: event.type,
           payload: event.payload,
           metadata: {
             ...event.metadata,
             timestamp: event.metadata.timestamp.toISOString()
           }
-        }),
+        })),
         headers: {
-          'event-type': event.type,
-          'correlation-id': event.metadata.correlationId,
-          ...(event.metadata.causationId && { 'causation-id': event.metadata.causationId }),
-          ...(event.metadata.idempotencyKey && { 'idempotency-key': event.metadata.idempotencyKey }),
-          ...options.headers
+          'event-type': Buffer.from(event.type),
+          'correlation-id': Buffer.from(event.metadata.correlationId),
+          ...(event.metadata.causationId && { 'causation-id': Buffer.from(event.metadata.causationId) }),
+          ...(event.metadata.idempotencyKey && { 'idempotency-key': Buffer.from(event.metadata.idempotencyKey) }),
+          ...Object.fromEntries(
+            Object.entries(options.headers ?? {}).map(([k, v]) => [k, Buffer.from(v)])
+          )
         }
       };
 

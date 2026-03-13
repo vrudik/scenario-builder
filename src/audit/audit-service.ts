@@ -11,7 +11,6 @@ import {
   type AuditEventInput,
   type AuditActionType,
   type AuditOutcomeType,
-  type AuditSeverityType,
 } from './audit-types';
 import { getLogger } from '../observability/logger';
 

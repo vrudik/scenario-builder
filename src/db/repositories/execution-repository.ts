@@ -5,7 +5,6 @@
  */
 
 import { prisma } from '../index';
-import { ExecutionContext } from '../../runtime/orchestrator';
 
 export interface CreateExecutionInput {
   executionId: string;
