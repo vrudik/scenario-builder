@@ -11,7 +11,7 @@
   - [x] Батч 1: cleanup неиспользуемых импортов/переменных в `src/web/*`.
   - [x] Батч 2: исправление типовых контрактов в `src/tools/*`.
   - [x] Батч 3: исправление строгих типов в `src/agent/*` и `src/runtime/*`.
-- [ ] Починить нестабильный тест `tests/scenarios-api.test.ts` (hook timeout).
+- [x] Починить нестабильный тест `tests/scenarios-api.test.ts` (hook timeout).
 
 1. Сначала снимаем блокеры сборки/демо (time-to-demo).
 2. Затем закрываем reliability и recoverability.

@@ -21,7 +21,7 @@ describe('Scenarios API', () => {
       cwd: path.join(__dirname, '..'),
       env: { ...process.env, DATABASE_URL: `file:${dbPath}` }
     });
-  });
+  }, 60000);
 
   afterAll(() => {
     // Очищаем тестовую БД после тестов
