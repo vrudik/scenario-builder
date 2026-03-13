@@ -50,7 +50,7 @@
 
 - [x] Добавить `.github/workflows/ci.yml` (lint/typecheck/test/build).
 - [x] Добавить smoke e2e для demo API.
-- [ ] Ввести semver + changelog/release notes.
+- [x] Ввести semver + changelog/release notes.
 - [ ] Добавить container runbook + healthchecks.
 
 ## Фаза 4 — Investor packaging (параллельно)
