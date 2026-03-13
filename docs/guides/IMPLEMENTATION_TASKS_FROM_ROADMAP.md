@@ -48,7 +48,7 @@
 
 ## Фаза 3 — CI/CD & release discipline (1 неделя)
 
-- [ ] Добавить `.github/workflows/ci.yml` (lint/typecheck/test/build).
+- [x] Добавить `.github/workflows/ci.yml` (lint/typecheck/test/build).
 - [ ] Добавить smoke e2e для demo API.
 - [ ] Ввести semver + changelog/release notes.
 - [ ] Добавить container runbook + healthchecks.
