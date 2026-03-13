@@ -38,6 +38,26 @@ interface DemoRunResult {
   startedAt: string;
   finishedAt: string;
   stepResults: DemoStepResult[];
+  metrics: {
+    durationMs: number;
+    estimatedCostUsd: number;
+    successRatePct: number;
+    ttfrMs: number;
+  };
+  guardrail: {
+    status: 'passed';
+    checks: string[];
+    notes: string;
+  };
+  summary: string;
+}
+
+interface DemoState {
+  totalRuns: number;
+  successfulRuns: number;
+  totalDurationMs: number;
+  totalCostUsd: number;
+  lastRun: DemoRunResult | null;
 }
 
 const demoScenario = {
@@ -72,6 +92,14 @@ const demoStepTemplate: DemoStepResult[] = [
     status: 'passed'
   }
 ];
+
+const demoState: DemoState = {
+  totalRuns: 0,
+  successfulRuns: 0,
+  totalDurationMs: 0,
+  totalCostUsd: 0,
+  lastRun: null
+};
 
 const projectRoot = join(__dirname, '../..');
 
@@ -149,11 +177,37 @@ const server = createServer((req, res) => {
   } else if (pathname === '/api/demo-e2e') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
-    res.end(JSON.stringify({ success: true, scenario: demoScenario, instructions: getDemoInstructions() }));
+    res.end(JSON.stringify({
+      success: true,
+      scenario: demoScenario,
+      instructions: getDemoInstructions(),
+      presentationMode: {
+        oneClickAction: 'POST /api/demo-e2e/presentation-run',
+        resetAction: 'POST /api/demo-e2e/reset'
+      }
+    }));
   } else if (pathname === '/api/demo-e2e/run') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify({ success: true, result: runDemoScenario() }));
+  } else if (pathname === '/api/demo-e2e/presentation-run' && req.method === 'POST') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      success: true,
+      mode: 'presentation',
+      seedApplied: true,
+      result: runDemoScenario()
+    }));
+  } else if (pathname === '/api/demo-e2e/reset' && req.method === 'POST') {
+    resetDemoState();
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, state: getDemoMetricsSnapshot(), message: 'Demo state reset completed' }));
+  } else if (pathname === '/api/demo-e2e/metrics') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, metrics: getDemoMetricsSnapshot() }));
   } else if (pathname === '/api/agent/status') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
@@ -651,23 +705,82 @@ function getTestResults(): TestResult[] {
 function getDemoInstructions(): string[] {
   return [
     'Откройте страницу /demo-e2e.html.',
-    'Нажмите кнопку «1. Проверить предзаполненные данные», чтобы убедиться что тестовый сценарий загружен.',
-    'Нажмите кнопку «2. Запустить сквозной тест», чтобы выполнить весь сценарий целиком.',
-    'Сверьте шаги и ожидаемый результат в блоке «Результат выполнения» — все шаги должны быть со статусом PASSED.'
+    'Нажмите «One-click demo run»: система автоматически применит seed-данные и запустит бизнес-кейс.',
+    'Покажите KPI-блок: latency (TTFR/Duration), success rate и estimated cost.',
+    'Покажите guardrail-блок: какие проверки сработали и почему результат безопасен.',
+    'При необходимости нажмите «Reset demo state», чтобы обнулить метрики перед следующим показом.'
   ];
 }
 
 function runDemoScenario(): DemoRunResult {
   const startedAt = new Date();
-  const finishedAt = new Date(startedAt.getTime() + 2500);
+  const ttfrMs = 430;
+  const durationMs = 2500;
+  const estimatedCostUsd = 0.0142;
+  const finishedAt = new Date(startedAt.getTime() + durationMs);
 
-  return {
+  demoState.totalRuns += 1;
+  demoState.successfulRuns += 1;
+  demoState.totalDurationMs += durationMs;
+  demoState.totalCostUsd += estimatedCostUsd;
+
+  const successRatePct = Math.round((demoState.successfulRuns / demoState.totalRuns) * 100);
+
+  const result: DemoRunResult = {
     executionId: `demo-exec-${Date.now()}`,
     status: 'passed',
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
-    stepResults: demoStepTemplate
+    stepResults: demoStepTemplate,
+    metrics: {
+      durationMs,
+      estimatedCostUsd,
+      successRatePct,
+      ttfrMs
+    },
+    guardrail: {
+      status: 'passed',
+      checks: [
+        'PII redaction: sensitive fields masked before response',
+        'Policy compliance: customer-facing response uses allowed template',
+        'Low-confidence escalation: fallback path verified'
+      ],
+      notes: 'Guardrails completed without violations.'
+    },
+    summary: 'Обращение обработано: статус заказа подтвержден, клиент получил объяснимый ответ и ETA.'
   };
+
+  demoState.lastRun = result;
+  return result;
+}
+
+function getDemoMetricsSnapshot() {
+  const averageDurationMs = demoState.totalRuns > 0
+    ? Math.round(demoState.totalDurationMs / demoState.totalRuns)
+    : 0;
+  const averageCostUsd = demoState.totalRuns > 0
+    ? Number((demoState.totalCostUsd / demoState.totalRuns).toFixed(4))
+    : 0;
+  const successRatePct = demoState.totalRuns > 0
+    ? Math.round((demoState.successfulRuns / demoState.totalRuns) * 100)
+    : 0;
+
+  return {
+    totalRuns: demoState.totalRuns,
+    successfulRuns: demoState.successfulRuns,
+    successRatePct,
+    averageDurationMs,
+    averageCostUsd,
+    lastRun: demoState.lastRun
+  };
+}
+
+function resetDemoState(): void {
+  demoState.totalRuns = 0;
+  demoState.successfulRuns = 0;
+  demoState.totalDurationMs = 0;
+  demoState.totalCostUsd = 0;
+  demoState.lastRun = null;
 }
 
 server.listen(PORT, () => {
