@@ -2,20 +2,11 @@
  * Скрипт для выполнения Agent Runtime из командной строки
  * Используется server.cjs для выполнения запросов
  */
-
 import { executeAgentRequest } from './agent-handler';
 import * as fs from 'fs';
-import * as path from 'path';
-import { initializeObservability, shutdownObservability } from '../observability';
-
 async function main() {
   // Перенаправляем все логи в stderr, чтобы stdout содержал только JSON
   // Это важно, потому что server.cjs парсит stdout как JSON
-  const originalConsoleLog = console.log;
-  const originalConsoleWarn = console.warn;
-  const originalConsoleError = console.error;
-  const originalConsoleInfo = console.info;
-  
   // Переопределяем console методы для перенаправления в stderr
   console.log = (...args: any[]) => {
     process.stderr.write('[LOG] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') + '\n');
@@ -29,27 +20,21 @@ async function main() {
   console.info = (...args: any[]) => {
     process.stderr.write('[INFO] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') + '\n');
   };
-  
   // НЕ инициализируем observability здесь - метрики должны быть инициализированы один раз при старте server.cjs
   // Если метрики не инициализированы, они просто не будут записываться, но выполнение продолжится
-
   try {
     // Читаем данные запроса из файла
     const requestFile = process.argv[2];
     if (!requestFile) {
       throw new Error('Request file not provided');
     }
-    
     const requestData = JSON.parse(fs.readFileSync(requestFile, 'utf-8'));
     const { userIntent, scenarioId } = requestData;
-    
     if (!userIntent) {
       throw new Error('userIntent is required');
     }
-    
     // Выполняем запрос
     const result = await executeAgentRequest(userIntent, scenarioId);
-    
     // Выводим результат в stdout для чтения server.cjs
     // Используем process.stdout напрямую, чтобы избежать проблем с console.log
     process.stdout.write(JSON.stringify(result) + '\n');
@@ -77,7 +62,6 @@ async function main() {
     // }
   }
 }
-
 main().catch(async (error) => {
   const errorResult = {
     success: false,

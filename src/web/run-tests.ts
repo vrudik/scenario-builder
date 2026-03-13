@@ -19,7 +19,7 @@ interface TestResult {
 async function runTests(): Promise<TestResult[]> {
   try {
     console.log('Запуск тестов...');
-    const { stdout, stderr } = await execAsync('npm test -- --reporter=json --run');
+    const { stdout } = await execAsync('npm test -- --reporter=json --run');
     
     // Парсинг результатов Vitest JSON
     const results: TestResult[] = [];
