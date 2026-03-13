@@ -15,21 +15,10 @@ import { Tool, RiskClass } from '../spec';
  * Типизированные входы/выходы инструмента
  */
 export interface ToolInputOutput {
-  inputs: {
-    [key: string]: {
-      type: string;
-      required: boolean;
-      description?: string;
-      schema?: unknown; // JSON Schema
-    };
-  };
-  outputs: {
-    [key: string]: {
-      type: string;
-      description?: string;
-      schema?: unknown;
-    };
-  };
+  // Поддерживаем JSON-schema style определения,
+  // т.к. инструменты описывают I/O именно в таком формате.
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
 }
 
 /**
@@ -66,7 +55,7 @@ export interface IdempotencyRules {
 /**
  * Полная информация об инструменте в реестре
  */
-export interface RegisteredTool extends Tool {
+export interface RegisteredTool extends Omit<Tool, 'rateLimit'> {
   inputOutput: ToolInputOutput;
   sla: ToolSLA;
   authorization: AuthorizationRequirements;
@@ -95,13 +84,7 @@ export class ToolRegistry {
    * Регистрация инструмента
    */
   register(tool: RegisteredTool): void {
-    this.tools.set(tool.id, {
-      ...tool,
-      metadata: {
-        ...tool.metadata,
-        updatedAt: new Date().toISOString()
-      }
-    });
+    this.tools.set(tool.id, tool);
   }
 
   /**
