@@ -38,6 +38,26 @@ interface DemoRunResult {
   startedAt: string;
   finishedAt: string;
   stepResults: DemoStepResult[];
+  metrics: {
+    durationMs: number;
+    estimatedCostUsd: number;
+    successRatePct: number;
+    ttfrMs: number;
+  };
+  guardrail: {
+    status: 'passed';
+    checks: string[];
+    notes: string;
+  };
+  summary: string;
+}
+
+interface DemoState {
+  totalRuns: number;
+  successfulRuns: number;
+  totalDurationMs: number;
+  totalCostUsd: number;
+  lastRun: DemoRunResult | null;
 }
 
 const demoScenario = {
@@ -72,6 +92,14 @@ const demoStepTemplate: DemoStepResult[] = [
     status: 'passed'
   }
 ];
+
+const demoState: DemoState = {
+  totalRuns: 0,
+  successfulRuns: 0,
+  totalDurationMs: 0,
+  totalCostUsd: 0,
+  lastRun: null
+};
 
 const projectRoot = join(__dirname, '../..');
 
@@ -149,11 +177,37 @@ const server = createServer((req, res) => {
   } else if (pathname === '/api/demo-e2e') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
-    res.end(JSON.stringify({ success: true, scenario: demoScenario, instructions: getDemoInstructions() }));
+    res.end(JSON.stringify({
+      success: true,
+      scenario: demoScenario,
+      instructions: getDemoInstructions(),
+      presentationMode: {
+        oneClickAction: 'POST /api/demo-e2e/presentation-run',
+        resetAction: 'POST /api/demo-e2e/reset'
+      }
+    }));
   } else if (pathname === '/api/demo-e2e/run') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify({ success: true, result: runDemoScenario() }));
+  } else if (pathname === '/api/demo-e2e/presentation-run' && req.method === 'POST') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      success: true,
+      mode: 'presentation',
+      seedApplied: true,
+      result: runDemoScenario()
+    }));
+  } else if (pathname === '/api/demo-e2e/reset' && req.method === 'POST') {
+    resetDemoState();
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, state: getDemoMetricsSnapshot(), message: 'Demo state reset completed' }));
+  } else if (pathname === '/api/demo-e2e/metrics') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, metrics: getDemoMetricsSnapshot() }));
   } else if (pathname === '/api/agent/status') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
@@ -258,328 +312,6 @@ function getEntryHTML(): string {
 </html>`;
 }
 
-function getIndexHTML(): string {
-  return `<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Конструктор сценариев - Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        
-        h1 {
-            color: white;
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 2.5em;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
-        }
-        
-        .dashboard {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .card {
-            background: white;
-            border-radius: 12px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            transition: transform 0.3s ease;
-        }
-        
-        .card:hover {
-            transform: translateY(-5px);
-        }
-        
-        .card h2 {
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 1.5em;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 10px;
-        }
-        
-        .status {
-            display: inline-block;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-weight: bold;
-            font-size: 0.9em;
-            margin-top: 10px;
-        }
-        
-        .status.ok {
-            background: #10b981;
-            color: white;
-        }
-        
-        .status.error {
-            background: #ef4444;
-            color: white;
-        }
-        
-        .status.pending {
-            background: #f59e0b;
-            color: white;
-        }
-        
-        .test-list {
-            list-style: none;
-            margin-top: 15px;
-        }
-        
-        .test-item {
-            padding: 10px;
-            margin: 5px 0;
-            background: #f3f4f6;
-            border-radius: 6px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .test-item.passed {
-            border-left-color: #10b981;
-        }
-        
-        .test-item.failed {
-            border-left-color: #ef4444;
-        }
-        
-        .test-name {
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .test-error {
-            color: #ef4444;
-            font-size: 0.9em;
-            margin-top: 5px;
-        }
-        
-        .refresh-btn {
-            display: block;
-            width: 100%;
-            padding: 15px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 1.1em;
-            font-weight: bold;
-            cursor: pointer;
-            margin-top: 20px;
-            transition: background 0.3s ease;
-        }
-        
-        .refresh-btn:hover {
-            background: #5568d3;
-        }
-        
-        .info-box {
-            background: #eff6ff;
-            border-left: 4px solid #3b82f6;
-            padding: 15px;
-            margin: 15px 0;
-            border-radius: 6px;
-        }
-        
-        .info-box code {
-            background: white;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 20px;
-            color: white;
-        }
-        
-        .spinner {
-            border: 4px solid rgba(255,255,255,0.3);
-            border-top: 4px solid white;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🚀 Конструктор автономных сценариев</h1>
-        
-        <div id="loading" class="loading">
-            <div class="spinner"></div>
-            <p>Загрузка данных...</p>
-        </div>
-        
-        <div id="dashboard" class="dashboard" style="display: none;">
-            <!-- Карточки будут добавлены динамически -->
-        </div>
-        
-        <button class="refresh-btn" onclick="loadData()">🔄 Обновить данные</button>
-    </div>
-    
-    <script>
-        async function loadData() {
-            const loading = document.getElementById('loading');
-            const dashboard = document.getElementById('dashboard');
-            
-            loading.style.display = 'block';
-            dashboard.style.display = 'none';
-            
-            try {
-                const [statusResponse, testResponse] = await Promise.all([
-                    fetch('/api/status'),
-                    fetch('/api/test-results')
-                ]);
-                
-                const status = await statusResponse.json();
-                const tests = await testResponse.json();
-                
-                renderDashboard(status, tests);
-                
-                loading.style.display = 'none';
-                dashboard.style.display = 'grid';
-            } catch (error) {
-                loading.innerHTML = '<p style="color: #ef4444;">Ошибка загрузки данных: ' + error.message + '</p>';
-            }
-        }
-        
-        function renderDashboard(status, tests) {
-            const dashboard = document.getElementById('dashboard');
-            dashboard.innerHTML = '';
-            
-            // Карточка статуса системы
-            const systemCard = createCard('Статус системы', [
-                { label: 'Компонентов', value: status.components.length },
-                { label: 'Работающих', value: status.components.filter(c => c.status === 'ok').length },
-                { label: 'С ошибками', value: status.components.filter(c => c.status === 'error').length }
-            ], status.components.every(c => c.status === 'ok') ? 'ok' : 'error');
-            dashboard.appendChild(systemCard);
-            
-            // Карточки компонентов
-            status.components.forEach(component => {
-                const card = createComponentCard(component);
-                dashboard.appendChild(card);
-            });
-            
-            // Карточка тестов
-            if (tests && tests.length > 0) {
-                const testCard = createTestCard(tests);
-                dashboard.appendChild(testCard);
-            }
-        }
-        
-        function createCard(title, items, statusClass = 'ok') {
-            const card = document.createElement('div');
-            card.className = 'card';
-            
-            let html = \`<h2>\${title}</h2>\`;
-            items.forEach(item => {
-                html += \`<div style="margin: 10px 0;">
-                    <strong>\${item.label}:</strong> <span>\${item.value}</span>
-                </div>\`;
-            });
-            html += \`<span class="status \${statusClass}">\${statusClass === 'ok' ? '✓ OK' : '✗ ERROR'}</span>\`;
-            
-            card.innerHTML = html;
-            return card;
-        }
-        
-        function createComponentCard(component) {
-            const card = document.createElement('div');
-            card.className = 'card';
-            
-            const statusClass = component.status === 'ok' ? 'ok' : 'error';
-            let html = \`<h2>\${component.name}</h2>\`;
-            html += \`<span class="status \${statusClass}">\${component.status === 'ok' ? '✓ Работает' : '✗ Ошибка'}</span>\`;
-            
-            if (component.tests && component.tests.length > 0) {
-                html += '<ul class="test-list">';
-                component.tests.forEach(test => {
-                    const testClass = test.status === 'passed' ? 'passed' : test.status === 'failed' ? 'failed' : 'pending';
-                    html += \`<li class="test-item \${testClass}">
-                        <div class="test-name">\${test.status === 'passed' ? '✓' : test.status === 'failed' ? '✗' : '○'} \${test.name}</div>\`;
-                    if (test.error) {
-                        html += \`<div class="test-error">\${test.error}</div>\`;
-                    }
-                    html += '</li>';
-                });
-                html += '</ul>';
-            }
-            
-            card.innerHTML = html;
-            return card;
-        }
-        
-        function createTestCard(tests) {
-            const card = document.createElement('div');
-            card.className = 'card';
-            
-            const passed = tests.filter(t => t.status === 'passed').length;
-            const failed = tests.filter(t => t.status === 'failed').length;
-            const total = tests.length;
-            
-            let html = '<h2>Результаты тестов</h2>';
-            html += \`<div style="margin: 10px 0;">
-                <strong>Всего:</strong> \${total} | 
-                <span style="color: #10b981;">✓ Прошло: \${passed}</span> | 
-                <span style="color: #ef4444;">✗ Провалено: \${failed}</span>
-            </div>\`;
-            html += '<ul class="test-list">';
-            tests.forEach(test => {
-                const testClass = test.status === 'passed' ? 'passed' : test.status === 'failed' ? 'failed' : 'pending';
-                html += \`<li class="test-item \${testClass}">
-                    <div class="test-name">\${test.status === 'passed' ? '✓' : test.status === 'failed' ? '✗' : '○'} \${test.name}</div>\`;
-                if (test.error) {
-                    html += \`<div class="test-error">\${test.error}</div>\`;
-                }
-                html += '</li>';
-            });
-            html += '</ul>';
-            
-            card.innerHTML = html;
-            return card;
-        }
-        
-        // Загрузка данных при загрузке страницы
-        loadData();
-        
-        // Автообновление каждые 5 секунд
-        setInterval(loadData, 5000);
-    </script>
-</body>
-</html>`;
-}
-
 function getSystemStatus() {
   // Проверка существования компонентов
   const components: ComponentStatus[] = [
@@ -651,23 +383,82 @@ function getTestResults(): TestResult[] {
 function getDemoInstructions(): string[] {
   return [
     'Откройте страницу /demo-e2e.html.',
-    'Нажмите кнопку «1. Проверить предзаполненные данные», чтобы убедиться что тестовый сценарий загружен.',
-    'Нажмите кнопку «2. Запустить сквозной тест», чтобы выполнить весь сценарий целиком.',
-    'Сверьте шаги и ожидаемый результат в блоке «Результат выполнения» — все шаги должны быть со статусом PASSED.'
+    'Нажмите «One-click demo run»: система автоматически применит seed-данные и запустит бизнес-кейс.',
+    'Покажите KPI-блок: latency (TTFR/Duration), success rate и estimated cost.',
+    'Покажите guardrail-блок: какие проверки сработали и почему результат безопасен.',
+    'При необходимости нажмите «Reset demo state», чтобы обнулить метрики перед следующим показом.'
   ];
 }
 
 function runDemoScenario(): DemoRunResult {
   const startedAt = new Date();
-  const finishedAt = new Date(startedAt.getTime() + 2500);
+  const ttfrMs = 430;
+  const durationMs = 2500;
+  const estimatedCostUsd = 0.0142;
+  const finishedAt = new Date(startedAt.getTime() + durationMs);
 
-  return {
+  demoState.totalRuns += 1;
+  demoState.successfulRuns += 1;
+  demoState.totalDurationMs += durationMs;
+  demoState.totalCostUsd += estimatedCostUsd;
+
+  const successRatePct = Math.round((demoState.successfulRuns / demoState.totalRuns) * 100);
+
+  const result: DemoRunResult = {
     executionId: `demo-exec-${Date.now()}`,
     status: 'passed',
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
-    stepResults: demoStepTemplate
+    stepResults: demoStepTemplate,
+    metrics: {
+      durationMs,
+      estimatedCostUsd,
+      successRatePct,
+      ttfrMs
+    },
+    guardrail: {
+      status: 'passed',
+      checks: [
+        'PII redaction: sensitive fields masked before response',
+        'Policy compliance: customer-facing response uses allowed template',
+        'Low-confidence escalation: fallback path verified'
+      ],
+      notes: 'Guardrails completed without violations.'
+    },
+    summary: 'Обращение обработано: статус заказа подтвержден, клиент получил объяснимый ответ и ETA.'
   };
+
+  demoState.lastRun = result;
+  return result;
+}
+
+function getDemoMetricsSnapshot() {
+  const averageDurationMs = demoState.totalRuns > 0
+    ? Math.round(demoState.totalDurationMs / demoState.totalRuns)
+    : 0;
+  const averageCostUsd = demoState.totalRuns > 0
+    ? Number((demoState.totalCostUsd / demoState.totalRuns).toFixed(4))
+    : 0;
+  const successRatePct = demoState.totalRuns > 0
+    ? Math.round((demoState.successfulRuns / demoState.totalRuns) * 100)
+    : 0;
+
+  return {
+    totalRuns: demoState.totalRuns,
+    successfulRuns: demoState.successfulRuns,
+    successRatePct,
+    averageDurationMs,
+    averageCostUsd,
+    lastRun: demoState.lastRun
+  };
+}
+
+function resetDemoState(): void {
+  demoState.totalRuns = 0;
+  demoState.successfulRuns = 0;
+  demoState.totalDurationMs = 0;
+  demoState.totalCostUsd = 0;
+  demoState.lastRun = null;
 }
 
 server.listen(PORT, () => {

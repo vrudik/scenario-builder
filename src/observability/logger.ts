@@ -8,7 +8,7 @@
  * - Контекстные метаданные
  */
 
-import { trace, context } from '@opentelemetry/api';
+import { trace } from '@opentelemetry/api';
 
 /**
  * Уровни логирования

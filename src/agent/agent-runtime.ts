@@ -12,8 +12,8 @@
 
 import { AgentRouter, RoutingContext, RoutingResult } from './router';
 import { ShortTermMemoryManager, LongTermMemoryManager } from './memory';
-import { GuardrailsManager, GuardrailResult } from './guardrails';
-import { CostManager, TokenUsage } from './cost-manager';
+import { GuardrailsManager } from './guardrails';
+import { CostManager } from './cost-manager';
 import { ToolGateway, ToolRequest, ToolRequestContext } from '../gateway';
 import { RegisteredTool } from '../registry';
 import { ScenarioSpec } from '../spec';
@@ -132,7 +132,7 @@ export class AgentRuntime {
   async execute(context: AgentExecutionContext): Promise<AgentExecutionResult> {
     return traceAsync(
       'agent.execute',
-      async (span) => {
+      async () => {
         addSpanAttributes({
           'agent.scenario_id': context.scenarioId,
           'agent.execution_id': context.executionId,
@@ -143,7 +143,7 @@ export class AgentRuntime {
           // 1. Роутинг - выбор роли агента
           const routingResult = this.routeAgent(context);
           addSpanAttributes({
-            'agent.role': routingResult.roleId || 'default',
+            'agent.role': routingResult.role?.id || 'default',
           });
       
           // 2. Проверка guardrails для пользовательского запроса
@@ -330,7 +330,7 @@ Do not just return tool call JSON - always follow up with a natural language exp
    */
   private async executeToolCallingCycle(
     context: AgentExecutionContext,
-    routingResult: RoutingResult,
+    _routingResult: RoutingResult,
     initialMessages: LLMMessage[]
   ): Promise<AgentExecutionResult> {
     const maxIterations = 10; // максимальное количество итераций
@@ -438,7 +438,7 @@ Do not just return tool call JSON - always follow up with a natural language exp
           // Выполнение tool call
           const toolResult = await traceAsync(
             'agent.tool.execute',
-            async (toolSpan) => {
+            async () => {
               addSpanAttributes({
                 'tool.id': toolCall.function.name,
                 'tool.call_id': toolCall.id,
@@ -511,7 +511,7 @@ Do not just return tool call JSON - always follow up with a natural language exp
           preserveSystemMessages: true,
           preserveRecentMessages: 5,
           strategy: 'fifo'
-        });
+        }) as unknown as LLMMessage[];
       }
     }
 
@@ -570,7 +570,7 @@ Do not just return tool call JSON - always follow up with a natural language exp
   ): Promise<LLMResponse> {
     return traceAsync(
       'agent.llm.call',
-      async (span) => {
+      async () => {
         addSpanAttributes({
           'llm.provider': this.llmConfig.provider,
           'llm.model': this.llmConfig.model,

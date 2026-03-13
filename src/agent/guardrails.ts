@@ -41,16 +41,6 @@ export class GuardrailsManager {
     /<\|im_end\|>/i
   ];
 
-  private readonly dangerousKeywords: string[] = [
-    'delete',
-    'drop',
-    'truncate',
-    'rm -rf',
-    'format',
-    'shutdown',
-    'reboot'
-  ];
-
   /**
    * Проверка входного промпта на prompt injection
    */
@@ -99,8 +89,6 @@ export class GuardrailsManager {
 
     // Проверка на опасные команды в выводе
     // Используем более точные паттерны, чтобы не блокировать обычные слова
-    const outputLower = output.toLowerCase();
-    
     // Опасные паттерны команд (только реально опасные команды, не просто слова)
     // Исключаем паттерны, которые могут сработать на обычный текст
     const dangerousCommandPatterns = [

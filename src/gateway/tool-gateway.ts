@@ -186,7 +186,7 @@ export class ToolGateway {
    */
   registerTool(
     toolId: string,
-    tool: RegisteredTool,
+    _tool: RegisteredTool,
     executor: (req: ToolRequest) => Promise<ToolResponse>
   ): void {
     this.toolExecutors.set(toolId, executor);

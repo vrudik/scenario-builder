@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Демо сквозного теста</title>
+  <title>Investor Demo Story</title>
   <style>
     :root {
       color-scheme: dark;
@@ -13,6 +13,7 @@
       --text: #e2e8f0;
       --muted: #94a3b8;
       --ok: #22c55e;
+      --warn: #f59e0b;
     }
 
     body {
@@ -24,11 +25,7 @@
       min-height: 100vh;
     }
 
-    .container {
-      max-width: 920px;
-      margin: 0 auto;
-    }
-
+    .container { max-width: 980px; margin: 0 auto; }
     .card {
       background: color-mix(in srgb, var(--card) 88%, black);
       border: 1px solid #334155;
@@ -37,17 +34,10 @@
       margin-bottom: 16px;
     }
 
-    h1 {
-      margin-top: 0;
-    }
+    h1 { margin-top: 0; }
+    .muted { color: var(--muted); }
 
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 14px;
-    }
-
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
     button {
       border: 0;
       border-radius: 10px;
@@ -57,11 +47,8 @@
       color: white;
       background: #2563eb;
     }
-
-    button.secondary {
-      background: #0ea5e9;
-      color: #082f49;
-    }
+    button.secondary { background: #0ea5e9; color: #082f49; }
+    button.warn { background: var(--warn); color: #111827; }
 
     pre {
       background: #020617;
@@ -73,47 +60,62 @@
       line-height: 1.45;
     }
 
-    .muted {
-      color: var(--muted);
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
     }
 
-    .passed {
-      color: var(--ok);
-      font-weight: 700;
+    .metric {
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 12px;
+      background: #0b1220;
     }
 
-    ol li {
-      margin-bottom: 8px;
-    }
+    .metric-value { font-size: 1.4rem; font-weight: 700; }
+    .passed { color: var(--ok); font-weight: 700; }
+    ol li { margin-bottom: 8px; }
   </style>
 </head>
 <body>
   <main class="container">
     <section class="card">
-      <h1>Сквозной демо-тест (готовые данные)</h1>
+      <h1>Investor demo story: Lead/Order Support</h1>
       <p class="muted">
-        Этот экран нужен для быстрой проверки: любой разработчик может загрузить заранее подготовленный сценарий,
-        запустить его одной кнопкой и увидеть ожидаемый результат по шагам.
+        One-click режим: seed-данные + запуск + KPI + guardrails на одном экране.
       </p>
       <div class="actions">
-        <button id="loadBtn" class="secondary">1. Проверить предзаполненные данные</button>
-        <button id="runBtn">2. Запустить сквозной тест</button>
+        <button id="loadBtn" class="secondary">Load demo brief</button>
+        <button id="runBtn">One-click demo run</button>
+        <button id="resetBtn" class="warn">Reset demo state</button>
       </div>
     </section>
 
     <section class="card">
-      <h2>Инструкция</h2>
+      <h2>Demo steps</h2>
       <ol id="instructionList"></ol>
     </section>
 
     <section class="card">
-      <h2>Предзаполненный сценарий</h2>
-      <pre id="scenarioOutput">Нажмите «Проверить предзаполненные данные»</pre>
+      <h2>KPI snapshot</h2>
+      <div class="metrics">
+        <div class="metric"><div class="muted">Success Rate</div><div id="kpiSuccess" class="metric-value">0%</div></div>
+        <div class="metric"><div class="muted">Avg Duration</div><div id="kpiDuration" class="metric-value">0 ms</div></div>
+        <div class="metric"><div class="muted">Avg Cost</div><div id="kpiCost" class="metric-value">$0.0000</div></div>
+        <div class="metric"><div class="muted">Total Runs</div><div id="kpiRuns" class="metric-value">0</div></div>
+      </div>
     </section>
 
     <section class="card">
-      <h2>Результат выполнения</h2>
-      <pre id="runOutput">Нажмите «Запустить сквозной тест»</pre>
+      <h2>Prefilled scenario</h2>
+      <pre id="scenarioOutput">Нажмите «Load demo brief»</pre>
+    </section>
+
+    <section class="card">
+      <h2>Last run result + guardrails</h2>
+      <pre id="runOutput">Нажмите «One-click demo run»</pre>
       <p id="statusLine" class="muted">Статус: не запускался</p>
     </section>
   </main>
@@ -121,65 +123,83 @@
   <script>
     const loadBtn = document.getElementById('loadBtn');
     const runBtn = document.getElementById('runBtn');
+    const resetBtn = document.getElementById('resetBtn');
     const scenarioOutput = document.getElementById('scenarioOutput');
     const runOutput = document.getElementById('runOutput');
     const instructionList = document.getElementById('instructionList');
     const statusLine = document.getElementById('statusLine');
 
-    async function loadDemoData() {
-      try {
-        const response = await fetch('/api/demo-e2e');
-        const data = await response.json();
-        if (!response.ok || !data.scenario) {
-          scenarioOutput.textContent = 'API недоступен (ответ: ' + response.status + '). Запустите сервер: npm run web или node server.cjs';
-          instructionList.innerHTML = '<li>Запустите проект из корня: <code>npm run web</code> или <code>node server.cjs</code></li>';
-          return;
-        }
-        scenarioOutput.textContent = JSON.stringify(data.scenario, null, 2);
-        instructionList.innerHTML = '';
-        (data.instructions || []).forEach((item) => {
-          const li = document.createElement('li');
-          li.textContent = item;
-          instructionList.appendChild(li);
-        });
-      } catch (e) {
-        scenarioOutput.textContent = 'Ошибка загрузки: ' + e.message + '. Убедитесь, что открываете страницу через http://localhost:3000/demo-e2e.html (сервер запущен).';
+    function updateKpi(metrics) {
+      document.getElementById('kpiSuccess').textContent = `${metrics.successRatePct}%`;
+      document.getElementById('kpiDuration').textContent = `${metrics.averageDurationMs} ms`;
+      document.getElementById('kpiCost').textContent = `$${Number(metrics.averageCostUsd).toFixed(4)}`;
+      document.getElementById('kpiRuns').textContent = String(metrics.totalRuns);
+    }
+
+    async function refreshMetrics() {
+      const response = await fetch('/api/demo-e2e/metrics');
+      const data = await response.json();
+      if (data.success && data.metrics) {
+        updateKpi(data.metrics);
       }
+    }
+
+    async function loadDemoData() {
+      const response = await fetch('/api/demo-e2e');
+      const data = await response.json();
+      if (!response.ok || !data.scenario) {
+        scenarioOutput.textContent = 'API недоступен. Запустите сервер: npm run web';
+        return;
+      }
+      scenarioOutput.textContent = JSON.stringify(data, null, 2);
+      instructionList.innerHTML = '';
+      (data.instructions || []).forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        instructionList.appendChild(li);
+      });
+      await refreshMetrics();
     }
 
     async function runDemo() {
       statusLine.textContent = 'Статус: выполняется...';
-      try {
-        const response = await fetch('/api/demo-e2e/run');
-        const data = await response.json();
-        if (!response.ok || !data.result) {
-          runOutput.textContent = 'API недоступен (ответ: ' + response.status + '). Запустите сервер: npm run web или node server.cjs';
-          statusLine.textContent = 'Статус: ошибка API';
-          return;
-        }
-        runOutput.textContent = JSON.stringify(data.result, null, 2);
-        statusLine.innerHTML = data.result.status === 'passed'
-          ? '<span class="passed">Статус: PASSED</span>'
-          : 'Статус: FAILED';
-      } catch (e) {
-        runOutput.textContent = 'Ошибка запуска: ' + e.message;
-        statusLine.textContent = 'Статус: ошибка';
+      const response = await fetch('/api/demo-e2e/presentation-run', { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok || !data.result) {
+        runOutput.textContent = `API недоступен (HTTP ${response.status})`;
+        statusLine.textContent = 'Статус: ошибка API';
+        return;
+      }
+      runOutput.textContent = JSON.stringify(data, null, 2);
+      statusLine.innerHTML = '<span class="passed">Статус: PASSED</span>';
+      await refreshMetrics();
+    }
+
+    async function resetDemo() {
+      const response = await fetch('/api/demo-e2e/reset', { method: 'POST' });
+      const data = await response.json();
+      runOutput.textContent = JSON.stringify(data, null, 2);
+      statusLine.textContent = 'Статус: демо-метрики сброшены';
+      if (data.state) {
+        updateKpi(data.state);
       }
     }
 
-    loadBtn.addEventListener('click', () => {
-      loadDemoData().catch((error) => {
-        scenarioOutput.textContent = `Ошибка загрузки: ${error.message}`;
-      });
-    });
+    loadBtn.addEventListener('click', () => loadDemoData().catch((error) => {
+      scenarioOutput.textContent = `Ошибка загрузки: ${error.message}`;
+    }));
 
-    runBtn.addEventListener('click', () => {
-      runDemo().catch((error) => {
-        runOutput.textContent = `Ошибка запуска: ${error.message}`;
-      });
-    });
+    runBtn.addEventListener('click', () => runDemo().catch((error) => {
+      runOutput.textContent = `Ошибка запуска: ${error.message}`;
+    }));
 
-    loadDemoData();
+    resetBtn.addEventListener('click', () => resetDemo().catch((error) => {
+      runOutput.textContent = `Ошибка reset: ${error.message}`;
+    }));
+
+    loadDemoData().catch(() => {
+      statusLine.textContent = 'Статус: ожидание сервера';
+    });
   </script>
 </body>
 </html>

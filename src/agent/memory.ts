@@ -94,7 +94,7 @@ export class ShortTermMemoryManager {
   /**
    * Получение контекста для LLM (последние сообщения)
    */
-  getContext(maxTokens: number = 2000): ShortTermMemory[] {
+  getContext(_maxTokens: number = 2000): ShortTermMemory[] {
     // Простая реализация: возвращаем последние записи
     // В реальной системе здесь будет подсчет токенов и обрезка
     return this.getRecent(20);

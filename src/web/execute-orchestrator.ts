@@ -14,13 +14,8 @@ import { registerAllTools } from '../tools';
 import { KafkaEventBus, IEventBus } from '../events';
 import { ExecutionRepository, NodeExecutionRepository } from '../db/repositories';
 import * as fs from 'fs';
-import * as path from 'path';
 
 // Перенаправляем все логи в stderr
-const originalConsoleLog = console.log;
-const originalConsoleWarn = console.warn;
-const originalConsoleError = console.error;
-const originalConsoleInfo = console.info;
 
 console.log = (...args: any[]) => {
   process.stderr.write('[LOG] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') + '\n');

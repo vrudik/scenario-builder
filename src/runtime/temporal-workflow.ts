@@ -25,9 +25,9 @@ const { executeNodeActivity, compensateNodeActivity } = proxyActivities<typeof a
  * Workflow для выполнения сценария
  */
 export async function scenarioWorkflow(
-  workflowGraph: unknown,
-  scenarioSpec: unknown,
-  initialContext: unknown
+  _workflowGraph: unknown,
+  _scenarioSpec: unknown,
+  _initialContext: unknown
 ): Promise<{ success: boolean; result?: unknown; error?: string }> {
   // В реальной реализации здесь будет:
   // 1. Парсинг workflow graph
@@ -40,7 +40,13 @@ export async function scenarioWorkflow(
     const nodeResult = await executeNodeActivity({
       nodeId: 'action-1',
       toolId: 'example-tool',
-      inputs: {}
+      inputs: {},
+      context: {
+        scenarioId: 'demo-scenario',
+        executionId: 'demo-execution',
+        userId: 'system',
+        userRoles: ['system']
+      }
     });
 
     if (!nodeResult.success) {

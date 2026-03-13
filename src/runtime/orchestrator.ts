@@ -14,7 +14,7 @@ import { WorkflowGraph, WorkflowNode, WorkflowEdge } from '../builder';
 import { ScenarioSpec } from '../spec';
 import { ToolGateway, ToolRequest, ToolRequestContext } from '../gateway';
 import { RegisteredTool, ToolRegistry } from '../registry';
-import { AgentRuntime, AgentExecutionContext, LLMConfig } from '../agent/agent-runtime';
+import { AgentRuntime, AgentExecutionContext } from '../agent/agent-runtime';
 import { IEventBus, BaseEvent, createEvent } from '../events';
 import { ExecutionRepository, NodeExecutionRepository } from '../db/repositories';
 import { TemporalClient } from './temporal-client';
@@ -158,8 +158,6 @@ export class Orchestrator {
    * Запуск выполнения сценария
    */
   async startExecution(context: ExecutionContext): Promise<string> {
-    const executionId = context.executionId;
-    
     // Если Temporal доступен, используем его для durable execution
     if (this.useTemporal && this.temporalClient) {
       return await this.startTemporalExecution(context);
@@ -210,14 +208,18 @@ export class Orchestrator {
 
       // Публикация события запуска
       if (this.eventBus) {
-        await this.eventBus.publish('scenario-execution', createEvent({
-          type: 'scenario.started',
-          metadata: {
-            executionId,
-            scenarioId: context.scenarioId,
-            userId: context.userId,
-          },
-        }));
+        await this.eventBus.publish(
+          createEvent(
+            'scenario.started',
+            {
+              executionId,
+              scenarioId: context.scenarioId,
+              userId: context.userId,
+            },
+            context.executionId
+          ),
+          { topic: 'scenario-execution' }
+        );
       }
 
       return executionId;
@@ -494,7 +496,7 @@ export class Orchestrator {
   private async executeAction(
     node: WorkflowNode,
     context: ExecutionContext,
-    state: WorkflowExecutionState,
+    _state: WorkflowExecutionState,
     result: NodeExecutionResult
   ): Promise<NodeExecutionResult> {
     const toolId = node.toolId;
@@ -632,7 +634,7 @@ export class Orchestrator {
           userRoles: context.userRoles,
           scenarioSpec: context.spec,
           availableTools,
-          userIntent,
+          userIntent: userIntent || 'Execute agent step',
           traceId: context.traceId,
           spanId: context.spanId
         };

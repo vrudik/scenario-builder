@@ -4,12 +4,9 @@
 
 import { AgentRuntime, LLMConfig } from '../agent/agent-runtime';
 import { ToolGateway } from '../gateway/tool-gateway';
-import { ToolRegistry, RegisteredTool } from '../registry/tool-registry';
+import { ToolRegistry } from '../registry/tool-registry';
 import { ScenarioSpecValidator, TriggerType, RiskClass } from '../spec/scenario-spec';
-import { getLogger } from '../observability/logger';
 import { registerAllTools } from '../tools';
-
-const logger = getLogger({ serviceName: 'agent-handler' });
 
 // Глобальные экземпляры для переиспользования
 let globalRegistry: ToolRegistry | null = null;

@@ -208,8 +208,8 @@ export class OllamaProvider {
         throw new Error(`Failed to list models: ${response.status}`);
       }
 
-      const data = await response.json();
-      return data.models?.map((m: any) => m.name) || [];
+      const data = (await response.json()) as { models?: Array<{ name: string }> };
+      return data.models?.map((m) => m.name) || [];
     } catch (error) {
       throw new Error(`Failed to list models: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }

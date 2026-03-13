@@ -4,7 +4,6 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import {
   connectEventBus,
   disconnectEventBus,
@@ -18,9 +17,6 @@ import {
 } from './event-bus-handler';
 
 // Перенаправляем все логи в stderr
-const originalConsoleLog = console.log;
-const originalConsoleWarn = console.warn;
-const originalConsoleError = console.error;
 
 console.log = (...args: any[]) => {
   process.stderr.write('[LOG] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') + '\n');

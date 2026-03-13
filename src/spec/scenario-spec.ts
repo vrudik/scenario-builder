@@ -170,7 +170,7 @@ export type ObservabilitySpec = z.infer<typeof ObservabilitySpecSchema>;
  * Валидатор Scenario Spec
  */
 export class ScenarioSpecValidator {
-  private schema: z.ZodSchema<ScenarioSpec>;
+  private schema;
 
   constructor() {
     this.schema = ScenarioSpecSchema;
