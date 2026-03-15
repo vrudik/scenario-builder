@@ -37,21 +37,21 @@
   - [x] latency (TTFR/duration),
   - [x] estimated cost per run.
 - [x] Добавить explainable guardrail-блок в результат запуска.
-- [ ] Добавить экспорт отчёта demo run (JSON/PDF-lite) для встречи с инвесторами.
+- [x] Добавить экспорт отчёта demo run (JSON/PDF-lite) для встречи с инвесторами.
 
 ## Фаза 2 — Production reliability (1–2 недели)
 
 - [ ] Реализовать non-stub durable execution path с Temporal.
 - [ ] Выровнять статусы execution между in-memory и durable режимом.
 - [ ] Добавить recovery после рестарта и тесты на идемпотентность.
-- [ ] Формализовать readiness/health endpoints.
+- [x] Формализовать readiness/health endpoints.
 
 ## Фаза 3 — CI/CD & release discipline (1 неделя)
 
 - [x] Добавить `.github/workflows/ci.yml` (lint/typecheck/test/build).
 - [x] Добавить smoke e2e для demo API.
 - [x] Ввести semver + changelog/release notes.
-- [ ] Добавить container runbook + healthchecks.
+- [x] Добавить container runbook + healthchecks.
 
 ## Фаза 4 — Investor packaging (параллельно)
 

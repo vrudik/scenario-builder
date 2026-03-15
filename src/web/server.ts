@@ -60,6 +60,27 @@ interface DemoState {
   lastRun: DemoRunResult | null;
 }
 
+interface DemoExportPayload {
+  generatedAt: string;
+  scenario: typeof demoScenario;
+  metrics: ReturnType<typeof getDemoMetricsSnapshot>;
+  latestRun: DemoRunResult;
+}
+
+interface HealthPayload {
+  status: 'ok';
+  service: string;
+  uptimeSec: number;
+  timestamp: string;
+}
+
+interface ReadinessPayload extends HealthPayload {
+  checks: {
+    staticAssetsAccessible: boolean;
+    demoApiAvailable: boolean;
+  };
+}
+
 const demoScenario = {
   id: 'demo-order-support',
   name: 'Демо: обработка обращения по заказу',
@@ -103,6 +124,25 @@ const demoState: DemoState = {
 
 const projectRoot = join(__dirname, '../..');
 
+function getHealthPayload(): HealthPayload {
+  return {
+    status: 'ok',
+    service: 'scenario-builder-web',
+    uptimeSec: Number(process.uptime().toFixed(2)),
+    timestamp: new Date().toISOString()
+  };
+}
+
+function getReadinessPayload(): ReadinessPayload {
+  return {
+    ...getHealthPayload(),
+    checks: {
+      staticAssetsAccessible: existsSync(join(projectRoot, 'admin-dashboard.html')),
+      demoApiAvailable: true
+    }
+  };
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   const pathname = url.pathname;
@@ -134,6 +174,16 @@ const server = createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify(getSystemStatus(), null, 2));
+  } else if (pathname === '/healthz' || pathname === '/api/health') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify(getHealthPayload()));
+  } else if (pathname === '/readyz' || pathname === '/api/ready') {
+    const readiness = getReadinessPayload();
+    const statusCode = Object.values(readiness.checks).every(Boolean) ? 200 : 503;
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(statusCode);
+    res.end(JSON.stringify(readiness));
   } else if (pathname === '/api/test-results') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
@@ -183,7 +233,8 @@ const server = createServer((req, res) => {
       instructions: getDemoInstructions(),
       presentationMode: {
         oneClickAction: 'POST /api/demo-e2e/presentation-run',
-        resetAction: 'POST /api/demo-e2e/reset'
+        resetAction: 'POST /api/demo-e2e/reset',
+        exportAction: 'GET /api/demo-e2e/export?format=json|pdf-lite'
       }
     }));
   } else if (pathname === '/api/demo-e2e/run') {
@@ -204,6 +255,32 @@ const server = createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify({ success: true, state: getDemoMetricsSnapshot(), message: 'Demo state reset completed' }));
+  } else if (pathname === '/api/demo-e2e/export') {
+    if (!demoState.lastRun) {
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(409);
+      res.end(JSON.stringify({
+        success: false,
+        error: 'NO_DEMO_RUN',
+        message: 'Run demo scenario before exporting report.'
+      }));
+      return;
+    }
+
+    const format = url.searchParams.get('format') || 'json';
+    if (format === 'pdf-lite') {
+      const payload = getDemoExportPayload();
+      res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="demo-run-${payload.latestRun.executionId}.md"`);
+      res.writeHead(200);
+      res.end(renderDemoPdfLite(payload));
+      return;
+    }
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="demo-run-${demoState.lastRun.executionId}.json"`);
+    res.writeHead(200);
+    res.end(JSON.stringify({ success: true, report: getDemoExportPayload() }, null, 2));
   } else if (pathname === '/api/demo-e2e/metrics') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
@@ -259,6 +336,48 @@ function serveFile(res: ServerResponse, filePath: string, contentType: string): 
     res.writeHead(500);
     res.end('Error');
   }
+}
+
+function getDemoExportPayload(): DemoExportPayload {
+  return {
+    generatedAt: new Date().toISOString(),
+    scenario: demoScenario,
+    metrics: getDemoMetricsSnapshot(),
+    latestRun: demoState.lastRun as DemoRunResult
+  };
+}
+
+function renderDemoPdfLite(payload: DemoExportPayload): string {
+  const run = payload.latestRun;
+  const metrics = payload.metrics;
+  const guardrailChecks = run.guardrail.checks.map(check => `- ${check}`).join('\n');
+  const steps = run.stepResults
+    .map((step, index) => `${index + 1}. **${step.step}** — ${step.expected}`)
+    .join('\n');
+
+  return [
+    '# Demo Run Report (PDF-lite)',
+    '',
+    `Generated at: ${payload.generatedAt}`,
+    `Execution ID: ${run.executionId}`,
+    `Scenario: ${payload.scenario.name} (${payload.scenario.id})`,
+    '',
+    '## KPI',
+    `- Success rate: ${metrics.successRatePct}%`,
+    `- Average duration: ${metrics.averageDurationMs} ms`,
+    `- Average cost: $${metrics.averageCostUsd}`,
+    `- Last run TTFR: ${run.metrics.ttfrMs} ms`,
+    '',
+    '## Guardrails',
+    guardrailChecks,
+    '',
+    '## Scenario steps',
+    steps,
+    '',
+    '## Summary',
+    run.summary,
+    ''
+  ].join('\n');
 }
 
 function getEntryHTML(): string {
