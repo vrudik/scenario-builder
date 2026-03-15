@@ -93,6 +93,29 @@ describe('Demo API smoke e2e', () => {
     expect(Array.isArray(body.result?.guardrail?.checks)).toBe(true);
   });
 
+
+  it('should export demo report in json and pdf-lite formats', async () => {
+    await fetch(`${BASE_URL}/api/demo-e2e/presentation-run`, { method: 'POST' });
+
+    const jsonExportResponse = await fetch(`${BASE_URL}/api/demo-e2e/export?format=json`);
+    expect(jsonExportResponse.ok).toBe(true);
+    expect(jsonExportResponse.headers.get('content-type')).toContain('application/json');
+
+    const jsonExportBody = await jsonExportResponse.json();
+    expect(jsonExportBody.success).toBe(true);
+    expect(jsonExportBody.report?.latestRun?.executionId).toContain('demo-exec-');
+    expect(jsonExportBody.report?.metrics?.totalRuns).toBeGreaterThan(0);
+
+    const pdfLiteResponse = await fetch(`${BASE_URL}/api/demo-e2e/export?format=pdf-lite`);
+    expect(pdfLiteResponse.ok).toBe(true);
+    expect(pdfLiteResponse.headers.get('content-type')).toContain('text/markdown');
+
+    const pdfLiteBody = await pdfLiteResponse.text();
+    expect(pdfLiteBody).toContain('# Demo Run Report (PDF-lite)');
+    expect(pdfLiteBody).toContain('## KPI');
+    expect(pdfLiteBody).toContain('## Guardrails');
+  });
+
   it('should return metrics and support reset', async () => {
     const metricsResponse = await fetch(`${BASE_URL}/api/demo-e2e/metrics`);
     expect(metricsResponse.ok).toBe(true);

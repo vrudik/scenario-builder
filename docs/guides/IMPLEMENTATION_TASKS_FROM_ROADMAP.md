@@ -37,7 +37,7 @@
   - [x] latency (TTFR/duration),
   - [x] estimated cost per run.
 - [x] Добавить explainable guardrail-блок в результат запуска.
-- [ ] Добавить экспорт отчёта demo run (JSON/PDF-lite) для встречи с инвесторами.
+- [x] Добавить экспорт отчёта demo run (JSON/PDF-lite) для встречи с инвесторами.
 
 ## Фаза 2 — Production reliability (1–2 недели)
 

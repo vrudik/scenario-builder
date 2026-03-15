@@ -156,6 +156,7 @@ npm run web
 2. Убедитесь, что отобразился сценарий `demo-order-support` и входные поля `customerId/orderId/message`.
 3. Нажмите **«2. Запустить сквозной тест»**.
 4. Убедитесь, что итоговый статус — `PASSED`, а в результате есть шаги выполнения.
+5. Для отчёта встречи используйте экспорт: `GET /api/demo-e2e/export?format=json` или `GET /api/demo-e2e/export?format=pdf-lite`.
 
 ## Пример использования
 
