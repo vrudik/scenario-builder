@@ -131,6 +131,12 @@ npm test -- --run
 
 Минимальные переменные окружения добавлены в `.env.example` (скопируйте в `.env` и при необходимости настройте значения).
 
+Healthchecks:
+- `GET /healthz` (`/api/health`) — liveness
+- `GET /readyz` (`/api/ready`) — readiness
+
+Контейнерный runbook: `docs/guides/CONTAINER_RUNBOOK.md`.
+
 ## Демо сквозного теста с предзаполненными данными
 
 Этот проект включает отдельный интерфейс для быстрого smoke/e2e прогона с фиксированным тестовым payload.

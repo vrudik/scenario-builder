@@ -60,6 +60,20 @@ interface DemoState {
   lastRun: DemoRunResult | null;
 }
 
+interface HealthPayload {
+  status: 'ok';
+  service: string;
+  uptimeSec: number;
+  timestamp: string;
+}
+
+interface ReadinessPayload extends HealthPayload {
+  checks: {
+    staticAssetsAccessible: boolean;
+    demoApiAvailable: boolean;
+  };
+}
+
 const demoScenario = {
   id: 'demo-order-support',
   name: 'Демо: обработка обращения по заказу',
@@ -103,6 +117,25 @@ const demoState: DemoState = {
 
 const projectRoot = join(__dirname, '../..');
 
+function getHealthPayload(): HealthPayload {
+  return {
+    status: 'ok',
+    service: 'scenario-builder-web',
+    uptimeSec: Number(process.uptime().toFixed(2)),
+    timestamp: new Date().toISOString()
+  };
+}
+
+function getReadinessPayload(): ReadinessPayload {
+  return {
+    ...getHealthPayload(),
+    checks: {
+      staticAssetsAccessible: existsSync(join(projectRoot, 'admin-dashboard.html')),
+      demoApiAvailable: true
+    }
+  };
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   const pathname = url.pathname;
@@ -134,6 +167,16 @@ const server = createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify(getSystemStatus(), null, 2));
+  } else if (pathname === '/healthz' || pathname === '/api/health') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify(getHealthPayload()));
+  } else if (pathname === '/readyz' || pathname === '/api/ready') {
+    const readiness = getReadinessPayload();
+    const statusCode = Object.values(readiness.checks).every(Boolean) ? 200 : 503;
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(statusCode);
+    res.end(JSON.stringify(readiness));
   } else if (pathname === '/api/test-results') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);

@@ -44,6 +44,24 @@ describe('Demo API smoke e2e', () => {
     }
   });
 
+
+  it('should expose liveness and readiness endpoints', async () => {
+    const healthResponse = await fetch(`${BASE_URL}/healthz`);
+    expect(healthResponse.ok).toBe(true);
+    const healthBody = await healthResponse.json();
+
+    expect(healthBody.status).toBe('ok');
+    expect(typeof healthBody.uptimeSec).toBe('number');
+
+    const readinessResponse = await fetch(`${BASE_URL}/readyz`);
+    expect(readinessResponse.ok).toBe(true);
+    const readinessBody = await readinessResponse.json();
+
+    expect(readinessBody.status).toBe('ok');
+    expect(readinessBody.checks?.staticAssetsAccessible).toBe(true);
+    expect(readinessBody.checks?.demoApiAvailable).toBe(true);
+  });
+
   it('should return demo brief payload', async () => {
     const response = await fetch(`${BASE_URL}/api/demo-e2e`);
     expect(response.ok).toBe(true);

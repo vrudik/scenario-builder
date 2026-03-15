@@ -52,6 +52,25 @@ const testFiles = [
 const okCount = components.filter(c => c.status === 'ok').length;
 const totalCount = components.length;
 
+function getHealthPayload() {
+  return {
+    status: 'ok',
+    service: 'scenario-builder-server',
+    uptimeSec: Number(process.uptime().toFixed(2)),
+    timestamp: new Date().toISOString()
+  };
+}
+
+function getReadinessPayload() {
+  return {
+    ...getHealthPayload(),
+    checks: {
+      staticAssetsAccessible: fs.existsSync(path.join(__dirname, 'admin-dashboard.html')),
+      apiStatusEndpointAvailable: true
+    }
+  };
+}
+
 const HTML = `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -2350,6 +2369,14 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         }));
       }
     });
+  } else if (pathname === '/healthz' || pathname === '/api/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(getHealthPayload()));
+  } else if (pathname === '/readyz' || pathname === '/api/ready') {
+    const readiness = getReadinessPayload();
+    const statusCode = Object.values(readiness.checks).every(Boolean) ? 200 : 503;
+    res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(readiness));
   } else if (pathname === '/api/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
