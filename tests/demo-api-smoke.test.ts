@@ -94,6 +94,21 @@ describe('Demo API smoke e2e', () => {
   });
 
 
+
+  it('should return about/trust payload with guardrails and observability snapshot', async () => {
+    await fetch(`${BASE_URL}/api/demo-e2e/presentation-run`, { method: 'POST' });
+
+    const response = await fetch(`${BASE_URL}/api/about-trust`);
+    expect(response.ok).toBe(true);
+
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    expect(body.trust?.health?.liveness?.status).toBe('ok');
+    expect(body.trust?.health?.readiness?.status).toBe('ok');
+    expect(Array.isArray(body.trust?.guardrails?.checks)).toBe(true);
+    expect(body.trust?.observability?.totalRuns).toBeGreaterThan(0);
+  });
+
   it('should export demo report in json and pdf-lite formats', async () => {
     await fetch(`${BASE_URL}/api/demo-e2e/presentation-run`, { method: 'POST' });
 

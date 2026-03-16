@@ -420,6 +420,7 @@ const server = http.createServer(async (req, res) => {
   <div class="actions">
     <a href="/admin-dashboard.html" class="btn-admin">Админский интерфейс</a>
     <a href="/demo-e2e.html" class="btn-admin btn-demo">Демо сквозного теста</a>
+    <a href="/about-trust.html" class="btn-admin" style="background:#0ea5e9;color:#082f49;">About / Trust</a>
   </div>
 </body>
 </html>`;
@@ -599,6 +600,21 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end('Error loading demo-e2e: ' + error.message);
     }
+  } else if (pathname === '/about-trust.html' || pathname === '/about-trust') {
+    try {
+      const aboutPath = path.join(__dirname, 'about-trust.html');
+      if (fs.existsSync(aboutPath)) {
+        const html = fs.readFileSync(aboutPath, 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('about-trust.html not found');
+      }
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Error loading about-trust: ' + error.message);
+    }
   } else if (pathname === '/api/demo-e2e') {
     const instructions = [
       'Откройте страницу /demo-e2e.html.',
@@ -636,6 +652,32 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify({ success: true, metrics: getDemoMetricsSnapshot() }));
+  } else if (pathname === '/api/about-trust') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      success: true,
+      trust: {
+        health: {
+          liveness: getHealthPayload(),
+          readiness: getReadinessPayload()
+        },
+        guardrails: {
+          status: demoState.lastRun?.guardrail.status ?? 'passed',
+          checks: demoState.lastRun?.guardrail.checks ?? [
+            'PII redaction: sensitive fields masked before response',
+            'Policy compliance: customer-facing response uses allowed template',
+            'Low-confidence escalation: fallback path verified'
+          ]
+        },
+        auditTrail: {
+          generatedAt: new Date().toISOString(),
+          lastExecutionId: demoState.lastRun?.executionId ?? null,
+          traceHint: '/api/demo-e2e/export?format=json'
+        },
+        observability: getDemoMetricsSnapshot()
+      }
+    }));
   } else if (pathname === '/api/demo-e2e/reset' && req.method === 'POST') {
     demoState.totalRuns = 0;
     demoState.successfulRuns = 0;

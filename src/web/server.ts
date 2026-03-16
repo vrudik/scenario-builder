@@ -285,6 +285,32 @@ const server = createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify({ success: true, metrics: getDemoMetricsSnapshot() }));
+  } else if (pathname === '/api/about-trust') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      success: true,
+      trust: {
+        health: {
+          liveness: getHealthPayload(),
+          readiness: getReadinessPayload()
+        },
+        guardrails: {
+          status: demoState.lastRun?.guardrail.status ?? 'passed',
+          checks: demoState.lastRun?.guardrail.checks ?? [
+            'PII redaction: sensitive fields masked before response',
+            'Policy compliance: customer-facing response uses allowed template',
+            'Low-confidence escalation: fallback path verified'
+          ]
+        },
+        auditTrail: {
+          generatedAt: new Date().toISOString(),
+          lastExecutionId: demoState.lastRun?.executionId ?? null,
+          traceHint: '/api/demo-e2e/export?format=json'
+        },
+        observability: getDemoMetricsSnapshot()
+      }
+    }));
   } else if (pathname === '/api/agent/status') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
@@ -426,6 +452,7 @@ function getEntryHTML(): string {
   <div class="actions">
     <a href="/admin-dashboard.html" class="btn-admin">Админский интерфейс</a>
     <a href="/demo-e2e.html" class="btn-admin btn-demo">Демо сквозного теста</a>
+    <a href="/about-trust.html" class="btn-admin" style="background:#0ea5e9;color:#082f49;">About / Trust</a>
   </div>
 </body>
 </html>`;

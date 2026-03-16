@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>About / Trust - Scenario Builder</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --muted: #94a3b8;
+      --text: #e2e8f0;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --line: #334155;
+      --accent: #3b82f6;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: radial-gradient(circle at top, #1e293b, var(--bg)); color: var(--text); }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 28px 18px 40px; }
+    h1 { margin: 0 0 8px; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 18px; }
+    .card { border: 1px solid var(--line); border-radius: 12px; background: rgba(17,24,39,0.85); padding: 14px; }
+    .badge { display:inline-block; padding:4px 10px; border-radius: 999px; background: rgba(34,197,94,0.2); color: #bbf7d0; font-weight: 700; font-size: 12px; }
+    ul { margin: 8px 0 0 18px; padding: 0; }
+    li { margin-bottom: 6px; }
+    pre { background: #020617; border-radius: 10px; padding: 12px; overflow: auto; border: 1px solid var(--line); }
+    .kpi { font-size: 1.4rem; font-weight: 700; margin-top: 8px; }
+    .top-actions { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
+    a.btn { color: white; text-decoration: none; background: var(--accent); padding: 10px 14px; border-radius: 10px; font-weight: 600; }
+    a.btn.secondary { background: #0ea5e9; color: #082f49; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <h1>About / Trust</h1>
+    <p class="muted">Краткий trust-профиль для investor demo: guardrails, audit trail и observability в одном экране.</p>
+
+    <div class="top-actions">
+      <a class="btn" href="/demo-e2e.html">Открыть Demo E2E</a>
+      <a class="btn secondary" href="/admin-dashboard.html">Открыть Admin Dashboard</a>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <span class="badge" id="healthBadge">loading...</span>
+        <h3>Liveness / Readiness</h3>
+        <pre id="healthBox">Загрузка...</pre>
+      </section>
+
+      <section class="card">
+        <h3>Guardrails</h3>
+        <ul id="guardrails"></ul>
+      </section>
+
+      <section class="card">
+        <h3>Audit Trail</h3>
+        <p class="muted">Последний execution ID</p>
+        <div class="kpi" id="executionId">n/a</div>
+        <p class="muted">Generated at: <span id="generatedAt">n/a</span></p>
+      </section>
+
+      <section class="card">
+        <h3>Observability Snapshot</h3>
+        <p class="muted">Total runs</p>
+        <div class="kpi" id="totalRuns">0</div>
+        <p class="muted">Success rate: <strong id="successRate">0%</strong></p>
+        <p class="muted">Avg duration: <strong id="avgDuration">0 ms</strong></p>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    async function loadTrustProfile() {
+      const response = await fetch('/api/about-trust');
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        document.getElementById('healthBox').textContent = JSON.stringify(data, null, 2);
+        document.getElementById('healthBadge').textContent = 'error';
+        return;
+      }
+
+      document.getElementById('healthBadge').textContent = data.trust.health.readiness.status.toUpperCase();
+      document.getElementById('healthBox').textContent = JSON.stringify(data.trust.health, null, 2);
+
+      const guardrails = document.getElementById('guardrails');
+      guardrails.innerHTML = '';
+      (data.trust.guardrails.checks || []).forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        guardrails.appendChild(li);
+      });
+
+      document.getElementById('executionId').textContent = data.trust.auditTrail.lastExecutionId || 'n/a';
+      document.getElementById('generatedAt').textContent = data.trust.auditTrail.generatedAt || 'n/a';
+      document.getElementById('totalRuns').textContent = String(data.trust.observability.totalRuns || 0);
+      document.getElementById('successRate').textContent = `${data.trust.observability.successRatePct || 0}%`;
+      document.getElementById('avgDuration').textContent = `${data.trust.observability.averageDurationMs || 0} ms`;
+    }
+
+    loadTrustProfile().catch((error) => {
+      document.getElementById('healthBox').textContent = `Ошибка загрузки: ${error.message}`;
+      document.getElementById('healthBadge').textContent = 'error';
+    });
+  </script>
+</body>
+</html>

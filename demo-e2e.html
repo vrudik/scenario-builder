@@ -90,6 +90,7 @@
         <button id="loadBtn" class="secondary">Load demo brief</button>
         <button id="runBtn">One-click demo run</button>
         <button id="resetBtn" class="warn">Reset demo state</button>
+        <button id="trustBtn" class="secondary">Open About / Trust</button>
       </div>
     </section>
 
@@ -124,6 +125,7 @@
     const loadBtn = document.getElementById('loadBtn');
     const runBtn = document.getElementById('runBtn');
     const resetBtn = document.getElementById('resetBtn');
+    const trustBtn = document.getElementById('trustBtn');
     const scenarioOutput = document.getElementById('scenarioOutput');
     const runOutput = document.getElementById('runOutput');
     const instructionList = document.getElementById('instructionList');
@@ -196,6 +198,10 @@
     resetBtn.addEventListener('click', () => resetDemo().catch((error) => {
       runOutput.textContent = `Ошибка reset: ${error.message}`;
     }));
+
+    trustBtn.addEventListener('click', () => {
+      window.location.href = '/about-trust.html';
+    });
 
     loadDemoData().catch(() => {
       statusLine.textContent = 'Статус: ожидание сервера';

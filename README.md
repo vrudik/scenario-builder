@@ -149,6 +149,7 @@ npm run web
 После запуска откройте:
 - `http://localhost:3000` — главная страница (кнопки «Админский интерфейс» и «Демо сквозного теста»)
 - `http://localhost:3000/demo-e2e.html` — экран демо сквозного теста
+- `http://localhost:3000/about-trust.html` — экран доверия (guardrails, audit trail, observability)
 - `http://localhost:3000/test-agent.html` — тест Agent Runtime (для полного агента запускайте `node server.cjs`)
 
 Порядок проверки:

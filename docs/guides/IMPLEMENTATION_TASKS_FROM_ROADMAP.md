@@ -56,7 +56,7 @@
 ## Фаза 4 — Investor packaging (параллельно)
 
 - [ ] Сформировать demo-пакет (architecture/business-case/KPI/risks).
-- [ ] Добавить экран About/Trust (guardrails, audit trail, observability).
+- [x] Добавить экран About/Trust (guardrails, audit trail, observability).
 - [ ] Подготовить демонстрационный отчёт выполнения (download/export).
 
 ## Пошаговый execution plan (следующие инкременты)
