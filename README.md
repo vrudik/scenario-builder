@@ -131,6 +131,12 @@ npm test -- --run
 
 Минимальные переменные окружения добавлены в `.env.example` (скопируйте в `.env` и при необходимости настройте значения).
 
+Healthchecks:
+- `GET /healthz` (`/api/health`) — liveness
+- `GET /readyz` (`/api/ready`) — readiness
+
+Контейнерный runbook: `docs/guides/CONTAINER_RUNBOOK.md`.
+
 ## Демо сквозного теста с предзаполненными данными
 
 Этот проект включает отдельный интерфейс для быстрого smoke/e2e прогона с фиксированным тестовым payload.
@@ -143,6 +149,7 @@ npm run web
 После запуска откройте:
 - `http://localhost:3000` — главная страница (кнопки «Админский интерфейс» и «Демо сквозного теста»)
 - `http://localhost:3000/demo-e2e.html` — экран демо сквозного теста
+- `http://localhost:3000/about-trust.html` — экран доверия (guardrails, audit trail, observability)
 - `http://localhost:3000/test-agent.html` — тест Agent Runtime (для полного агента запускайте `node server.cjs`)
 
 Порядок проверки:
@@ -150,6 +157,7 @@ npm run web
 2. Убедитесь, что отобразился сценарий `demo-order-support` и входные поля `customerId/orderId/message`.
 3. Нажмите **«2. Запустить сквозной тест»**.
 4. Убедитесь, что итоговый статус — `PASSED`, а в результате есть шаги выполнения.
+5. Для отчёта встречи используйте экспорт: `GET /api/demo-e2e/export?format=json` или `GET /api/demo-e2e/export?format=pdf-lite`.
 
 ## Пример использования
 

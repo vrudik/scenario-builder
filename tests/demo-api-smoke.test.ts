@@ -44,6 +44,24 @@ describe('Demo API smoke e2e', () => {
     }
   });
 
+
+  it('should expose liveness and readiness endpoints', async () => {
+    const healthResponse = await fetch(`${BASE_URL}/healthz`);
+    expect(healthResponse.ok).toBe(true);
+    const healthBody = await healthResponse.json();
+
+    expect(healthBody.status).toBe('ok');
+    expect(typeof healthBody.uptimeSec).toBe('number');
+
+    const readinessResponse = await fetch(`${BASE_URL}/readyz`);
+    expect(readinessResponse.ok).toBe(true);
+    const readinessBody = await readinessResponse.json();
+
+    expect(readinessBody.status).toBe('ok');
+    expect(readinessBody.checks?.staticAssetsAccessible).toBe(true);
+    expect(readinessBody.checks?.demoApiAvailable).toBe(true);
+  });
+
   it('should return demo brief payload', async () => {
     const response = await fetch(`${BASE_URL}/api/demo-e2e`);
     expect(response.ok).toBe(true);
@@ -73,6 +91,44 @@ describe('Demo API smoke e2e', () => {
     expect(body.result?.metrics?.estimatedCostUsd).toBeGreaterThan(0);
     expect(body.result?.guardrail?.status).toBe('passed');
     expect(Array.isArray(body.result?.guardrail?.checks)).toBe(true);
+  });
+
+
+
+  it('should return about/trust payload with guardrails and observability snapshot', async () => {
+    await fetch(`${BASE_URL}/api/demo-e2e/presentation-run`, { method: 'POST' });
+
+    const response = await fetch(`${BASE_URL}/api/about-trust`);
+    expect(response.ok).toBe(true);
+
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    expect(body.trust?.health?.liveness?.status).toBe('ok');
+    expect(body.trust?.health?.readiness?.status).toBe('ok');
+    expect(Array.isArray(body.trust?.guardrails?.checks)).toBe(true);
+    expect(body.trust?.observability?.totalRuns).toBeGreaterThan(0);
+  });
+
+  it('should export demo report in json and pdf-lite formats', async () => {
+    await fetch(`${BASE_URL}/api/demo-e2e/presentation-run`, { method: 'POST' });
+
+    const jsonExportResponse = await fetch(`${BASE_URL}/api/demo-e2e/export?format=json`);
+    expect(jsonExportResponse.ok).toBe(true);
+    expect(jsonExportResponse.headers.get('content-type')).toContain('application/json');
+
+    const jsonExportBody = await jsonExportResponse.json();
+    expect(jsonExportBody.success).toBe(true);
+    expect(jsonExportBody.report?.latestRun?.executionId).toContain('demo-exec-');
+    expect(jsonExportBody.report?.metrics?.totalRuns).toBeGreaterThan(0);
+
+    const pdfLiteResponse = await fetch(`${BASE_URL}/api/demo-e2e/export?format=pdf-lite`);
+    expect(pdfLiteResponse.ok).toBe(true);
+    expect(pdfLiteResponse.headers.get('content-type')).toContain('text/markdown');
+
+    const pdfLiteBody = await pdfLiteResponse.text();
+    expect(pdfLiteBody).toContain('# Demo Run Report (PDF-lite)');
+    expect(pdfLiteBody).toContain('## KPI');
+    expect(pdfLiteBody).toContain('## Guardrails');
   });
 
   it('should return metrics and support reset', async () => {
