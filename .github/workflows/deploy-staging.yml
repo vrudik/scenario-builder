@@ -1,0 +1,88 @@
+# Выкат staging на хост с Docker Compose по SSH (опционально).
+# По умолчанию dry_run=true — только печатает целевой образ (без секретов Environment).
+#
+# Отличие от docker-publish.yml: тот workflow только пушит в GHCR; этот — pull/up на удалённой машине.
+name: Deploy staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Тег образа в GHCR (latest, sha-…, semver с docker-publish)'
+        required: true
+        default: 'latest'
+      dry_run:
+        description: 'true = только вывод инструкций; false = SSH-деплой (нужен Environment staging)'
+        required: true
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      git_ref:
+        description: 'На сервере: git fetch/checkout этой ветки перед compose (например main)'
+        required: true
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  image-ref:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.i.outputs.image }}
+    steps:
+      - id: i
+        run: |
+          LOWER=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${LOWER}:${{ github.event.inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+
+  dry-run:
+    needs: image-ref
+    if: github.event.inputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Инструкции (без выката)
+        env:
+          IMAGE: ${{ needs.image-ref.outputs.image }}
+        run: |
+          echo "Целевой образ: $IMAGE"
+          echo "Для реального SSH-выката: повторите workflow с dry_run=false."
+          echo "Настройте Environment «staging» и секреты: см. docs/guides/DEPLOY_CI_GITHUB.md"
+
+  ssh-deploy:
+    needs: image-ref
+    if: github.event.inputs.dry_run == 'false'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+
+      - name: SSH deploy (git pull + compose pull/up)
+        env:
+          IMAGE: ${{ needs.image-ref.outputs.image }}
+          REMOTE_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          REMOTE_USER: ${{ secrets.STAGING_SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.STAGING_DEPLOY_PATH }}
+          GIT_REF: ${{ github.event.inputs.git_ref }}
+        run: |
+          set -euo pipefail
+          for v in REMOTE_HOST REMOTE_USER DEPLOY_PATH; do
+            x=$(printenv "$v" || true)
+            if [ -z "${x:-}" ]; then
+              echo "Не задан secret $v в Environment staging. См. docs/guides/DEPLOY_CI_GITHUB.md"
+              exit 1
+            fi
+          done
+          ssh -o StrictHostKeyChecking=accept-new \
+            "${REMOTE_USER}@${REMOTE_HOST}" \
+            "set -euo pipefail
+             cd \"${DEPLOY_PATH}\"
+             git fetch origin \"${GIT_REF}\"
+             git checkout \"${GIT_REF}\"
+             git pull origin \"${GIT_REF}\"
+             export STAGING_GHCR_IMAGE=\"${IMAGE}\"
+             docker compose -f docker-compose.staging.ghcr.yml pull
+             docker compose -f docker-compose.staging.ghcr.yml up -d"

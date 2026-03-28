@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Конструктор spec — Scenario Builder</title>
+    <link rel="stylesheet" href="/admin-styles.css">
+    <style>
+        .studio-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 960px) { .studio-grid { grid-template-columns: 1fr; } }
+        .tools-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .tools-table th, .tools-table td { padding: 8px; border-bottom: 1px solid var(--border); text-align: left; }
+        .tools-table input, .tools-table select { width: 100%; padding: 6px; box-sizing: border-box; }
+        .inline-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .preview-box {
+            min-height: 320px;
+            font-family: ui-monospace, monospace;
+            font-size: 12px;
+        }
+        .banner {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <span>⚙️</span>
+                <span>Scenario Builder Admin</span>
+            </div>
+            <div class="nav-links">
+                <a href="/admin-dashboard.html" class="nav-link"><span>📊</span><span>Overview</span></a>
+                <a href="/admin-components.html" class="nav-link"><span>🧩</span><span>Components</span></a>
+                <a href="/admin-testing.html" class="nav-link"><span>🧪</span><span>Testing</span></a>
+                <a href="/admin-monitoring.html" class="nav-link"><span>📈</span><span>Monitoring</span></a>
+                <a href="/admin-runs.html" class="nav-link"><span>🎯</span><span>Выполнения</span></a>
+                <a href="/admin-scenarios.html" class="nav-link"><span>📋</span><span>Scenarios</span></a>
+                <a href="/admin-spec-studio.html" class="nav-link active"><span>✏️</span><span>Конструктор</span></a>
+                <a href="/admin-queues.html" class="nav-link"><span>🔄</span><span>Queues</span></a>
+                <a href="/admin-templates.html" class="nav-link"><span>📚</span><span>Templates</span></a>
+                <a href="/admin-config.html" class="nav-link"><span>⚙️</span><span>Configuration</span></a>
+            </div>
+            <div class="nav-status">
+                <span class="status-indicator"></span>
+                <span>System Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <div class="page-header">
+            <h1 class="page-title">Конструктор Scenario Spec</h1>
+            <p class="page-subtitle">
+                Заполните поля формы — JSON соберётся автоматически. Черновик хранится в браузере (localStorage).
+                Финальная валидация — при сохранении сценария на странице <a href="/admin-scenarios.html">Scenarios</a>.
+            </p>
+        </div>
+
+        <div class="banner">
+            После сборки: «Создать сценарий…» откроет страницу сценариев с заполненной формой, либо «Копировать JSON» / правка в превью и вставка в модалку вручную.
+        </div>
+
+        <div class="studio-grid">
+            <div class="section-card">
+                <div class="section-header">
+                    <h2 class="section-title"><span class="section-icon">📄</span> Основное</h2>
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fVersion">version</label>
+                    <input type="text" class="config-input" id="fVersion" value="0.1.0">
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fId">id *</label>
+                    <input type="text" class="config-input" id="fId" placeholder="my-scenario-001">
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fName">name *</label>
+                    <input type="text" class="config-input" id="fName" placeholder="Название">
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fDesc">description</label>
+                    <textarea class="config-input" id="fDesc" rows="2"></textarea>
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fGoal">goal *</label>
+                    <textarea class="config-input" id="fGoal" rows="3" placeholder="Цель сценария"></textarea>
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fRisk">riskClass</label>
+                    <select class="config-input" id="fRisk">
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                        <option value="critical">critical</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fDeployStrategy">deployment.strategy (override)</label>
+                    <select class="config-input" id="fDeployStrategy">
+                        <option value="">— по riskClass —</option>
+                        <option value="all-at-once">all-at-once</option>
+                        <option value="canary">canary</option>
+                        <option value="shadow">shadow</option>
+                        <option value="blue-green">blue-green</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fCanaryPct">deployment.canaryPercentage (%)</label>
+                    <input type="number" class="config-input" id="fCanaryPct" min="0" max="100" placeholder="по умолч. 10">
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fShadowPct">deployment.shadowPercentage (%)</label>
+                    <input type="number" class="config-input" id="fShadowPct" min="0" max="100" placeholder="по умолч. 10">
+                </div>
+            </div>
+
+            <div class="section-card">
+                <div class="section-header">
+                    <h2 class="section-title"><span class="section-icon">⚡</span> Триггер и данные</h2>
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fTrigType">triggers[0].type</label>
+                    <select class="config-input" id="fTrigType">
+                        <option value="manual">manual</option>
+                        <option value="event">event</option>
+                        <option value="webhook">webhook</option>
+                        <option value="schedule">schedule</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label class="config-label" for="fTrigSource">source / pattern (опционально)</label>
+                    <input type="text" class="config-input" id="fTrigSource" placeholder="user.request или cron">
+                </div>
+                <div class="config-item">
+                    <label class="config-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="fDataOn">
+                        <span>Добавить dataContract (минимальный)</span>
+                    </label>
+                </div>
+                <div class="config-item" id="dataContractFields" style="display:none;">
+                    <label class="config-label" for="fSources">sources (через запятую)</label>
+                    <input type="text" class="config-input" id="fSources" placeholder="crm, support_queue">
+                    <label class="config-label" for="fPii" style="margin-top:8px;">piiClassification</label>
+                    <select class="config-input" id="fPii">
+                        <option value="none">none</option>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title"><span class="section-icon">🔧</span> Инструменты (allowedActions)</h2>
+            </div>
+            <table class="tools-table">
+                <thead>
+                    <tr>
+                        <th style="width:22%">id</th>
+                        <th style="width:22%">name</th>
+                        <th style="width:12%">version</th>
+                        <th style="width:16%">riskClass</th>
+                        <th style="width:14%">approval</th>
+                        <th style="width:14%"></th>
+                    </tr>
+                </thead>
+                <tbody id="toolsBody"></tbody>
+            </table>
+            <button type="button" class="action-btn secondary btn-small" id="addToolRow" style="margin-top:10px;">+ Строка</button>
+        </div>
+
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title"><span class="section-icon">🚦</span> Полосы деплоя (Canary v2)</h2>
+            </div>
+            <p class="hint" style="margin-top:0;">Опционально. Id инструментов через запятую. Пустые поля в JSON не попадают.</p>
+            <div class="config-item">
+                <label class="config-label" for="fCanaryAllow">canaryAllowedTools</label>
+                <input type="text" class="config-input" id="fCanaryAllow" placeholder="на canary только эти id (если задано)">
+            </div>
+            <div class="config-item">
+                <label class="config-label" for="fCanaryBlock">canaryBlockedToolIds</label>
+                <input type="text" class="config-input" id="fCanaryBlock" placeholder="запрет на полосе canary">
+            </div>
+            <div class="config-item">
+                <label class="config-label" for="fStableBlock">stableBlockedToolIds</label>
+                <input type="text" class="config-input" id="fStableBlock" placeholder="запрет на stable — инструмент только для canary-трафика">
+            </div>
+        </div>
+
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title"><span class="section-icon">💰</span> Бюджет (nonFunctional)</h2>
+            </div>
+            <p class="hint" style="margin-top:0;">Попадает в ExecutionPolicy и OPA (лимиты токенов/стоимости). Пустые поля не сериализуются.</p>
+            <div class="config-item">
+                <label class="config-label" for="fCostMax">nonFunctional.cost.maxPerExecution (USD)</label>
+                <input type="number" class="config-input" id="fCostMax" min="0" step="0.01" placeholder="опционально">
+            </div>
+            <div class="config-item">
+                <label class="config-label" for="fTokenMax">nonFunctional.tokenBudget.maxPerExecution (tokens)</label>
+                <input type="number" class="config-input" id="fTokenMax" min="0" step="1" placeholder="опционально">
+            </div>
+        </div>
+
+        <div class="section-card">
+            <div class="inline-actions">
+                <button type="button" class="action-btn" id="btnBuild">Обновить превью</button>
+                <button type="button" class="action-btn secondary" id="btnSaveDraft">Сохранить черновик</button>
+                <button type="button" class="action-btn secondary" id="btnLoadDraft">Загрузить черновик</button>
+                <button type="button" class="action-btn secondary" id="btnTemplate">Шаблон: support</button>
+                <button type="button" class="action-btn secondary" id="btnCopy">Копировать JSON</button>
+                <button type="button" class="action-btn success" id="btnToScenarios">Создать сценарий…</button>
+                <button type="button" class="action-btn secondary" id="btnRememberForCreate">Запомнить для формы</button>
+                <button type="button" class="action-btn warning" id="btnClearDraft">Сбросить форму</button>
+            </div>
+            <p class="hint" id="studioMsg"></p>
+            <textarea class="config-input preview-box" id="jsonPreview" spellcheck="false"></textarea>
+        </div>
+    </div>
+
+    <script src="/admin-common.js"></script>
+    <script>
+        const LS_DRAFT = 'scenarioBuilder.specStudioDraft';
+        /** JSON для модалки «Create Scenario» на admin-scenarios.html */
+        const LS_PENDING_CREATE_SPEC = 'scenarioBuilder.pendingCreateSpecJson';
+        const toolsBody = document.getElementById('toolsBody');
+        const fVersion = document.getElementById('fVersion');
+        const fId = document.getElementById('fId');
+        const fName = document.getElementById('fName');
+        const fDesc = document.getElementById('fDesc');
+        const fGoal = document.getElementById('fGoal');
+        const fRisk = document.getElementById('fRisk');
+        const fTrigType = document.getElementById('fTrigType');
+        const fTrigSource = document.getElementById('fTrigSource');
+        const fDataOn = document.getElementById('fDataOn');
+        const fSources = document.getElementById('fSources');
+        const fPii = document.getElementById('fPii');
+
+        function defaultToolRow() {
+            return { id: 'web-search-tool', name: 'Web Search', version: '1.0.0', riskClass: 'low', requiresApproval: false };
+        }
+
+        function addToolRow(data) {
+            const d = data || defaultToolRow();
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input type="text" class="tool-id" value="${escapeAttr(d.id)}"></td>
+                <td><input type="text" class="tool-name" value="${escapeAttr(d.name)}"></td>
+                <td><input type="text" class="tool-ver" value="${escapeAttr(d.version)}"></td>
+                <td>
+                    <select class="tool-risk">
+                        <option value="low" ${d.riskClass === 'low' ? 'selected' : ''}>low</option>
+                        <option value="medium" ${d.riskClass === 'medium' ? 'selected' : ''}>medium</option>
+                        <option value="high" ${d.riskClass === 'high' ? 'selected' : ''}>high</option>
+                        <option value="critical" ${d.riskClass === 'critical' ? 'selected' : ''}>critical</option>
+                    </select>
+                </td>
+                <td><input type="checkbox" class="tool-appr" ${d.requiresApproval ? 'checked' : ''}></td>
+                <td><button type="button" class="action-btn btn-small warning row-del">✕</button></td>
+            `;
+            tr.querySelector('.row-del').addEventListener('click', () => { tr.remove(); buildPreview(); });
+            tr.querySelectorAll('input,select').forEach(el => el.addEventListener('input', buildPreview));
+            tr.querySelectorAll('input,select').forEach(el => el.addEventListener('change', buildPreview));
+            toolsBody.appendChild(tr);
+        }
+
+        function escapeAttr(s) {
+            return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+        }
+
+        function commaList(id) {
+            const el = document.getElementById(id);
+            if (!el || !el.value) return [];
+            return el.value.split(',').map(s => s.trim()).filter(Boolean);
+        }
+
+        function collectTools() {
+            const out = [];
+            toolsBody.querySelectorAll('tr').forEach(tr => {
+                const id = tr.querySelector('.tool-id')?.value.trim();
+                if (!id) return;
+                out.push({
+                    id,
+                    name: tr.querySelector('.tool-name')?.value.trim() || id,
+                    version: tr.querySelector('.tool-ver')?.value.trim() || '1.0.0',
+                    riskClass: tr.querySelector('.tool-risk')?.value || 'low',
+                    requiresApproval: !!tr.querySelector('.tool-appr')?.checked
+                });
+            });
+            return out;
+        }
+
+        function buildSpecObject() {
+            const trigType = document.getElementById('fTrigType').value;
+            const src = document.getElementById('fTrigSource').value.trim();
+            const trigger = { type: trigType };
+            if (src) {
+                if (trigType === 'schedule') trigger.pattern = src;
+                else trigger.source = src;
+            }
+            const spec = {
+                version: document.getElementById('fVersion').value.trim() || '0.1.0',
+                id: document.getElementById('fId').value.trim(),
+                name: document.getElementById('fName').value.trim(),
+                goal: document.getElementById('fGoal').value.trim(),
+                triggers: [trigger],
+                allowedActions: collectTools(),
+                riskClass: document.getElementById('fRisk').value
+            };
+            const desc = document.getElementById('fDesc').value.trim();
+            if (desc) spec.description = desc;
+            if (document.getElementById('fDataOn').checked) {
+                const sources = document.getElementById('fSources').value.split(',').map(s => s.trim()).filter(Boolean);
+                spec.dataContract = {
+                    sources: sources.length ? sources : ['internal'],
+                    quality: { required: true },
+                    piiClassification: document.getElementById('fPii').value
+                };
+            }
+            const ca = commaList('fCanaryAllow');
+            if (ca.length) spec.canaryAllowedTools = ca;
+            const cb = commaList('fCanaryBlock');
+            if (cb.length) spec.canaryBlockedToolIds = cb;
+            const sb = commaList('fStableBlock');
+            if (sb.length) spec.stableBlockedToolIds = sb;
+
+            const deployStrat = document.getElementById('fDeployStrategy').value;
+            if (deployStrat) {
+                const dep = { strategy: deployStrat };
+                const cp = parseInt(document.getElementById('fCanaryPct').value, 10);
+                const sp = parseInt(document.getElementById('fShadowPct').value, 10);
+                if (deployStrat === 'canary' && !Number.isNaN(cp)) dep.canaryPercentage = Math.min(100, Math.max(0, cp));
+                if (deployStrat === 'shadow' && !Number.isNaN(sp)) dep.shadowPercentage = Math.min(100, Math.max(0, sp));
+                spec.deployment = dep;
+            }
+
+            const costRaw = document.getElementById('fCostMax').value.trim();
+            const tokenRaw = document.getElementById('fTokenMax').value.trim();
+            const costN = costRaw === '' ? NaN : parseFloat(costRaw);
+            const tokenN = tokenRaw === '' ? NaN : parseInt(tokenRaw, 10);
+            if (!Number.isNaN(costN) || !Number.isNaN(tokenN)) {
+                spec.nonFunctional = {};
+                if (!Number.isNaN(costN) && costN >= 0) spec.nonFunctional.cost = { maxPerExecution: costN };
+                if (!Number.isNaN(tokenN) && tokenN >= 0) spec.nonFunctional.tokenBudget = { maxPerExecution: tokenN };
+            }
+
+            return spec;
+        }
+
+        function buildPreview() {
+            const spec = buildSpecObject();
+            document.getElementById('jsonPreview').value = JSON.stringify(spec, null, 2);
+        }
+
+        function msg(text, isErr) {
+            const el = document.getElementById('studioMsg');
+            el.textContent = text || '';
+            el.style.color = isErr ? '#b91c1c' : 'var(--text-secondary)';
+        }
+
+        function saveDraft() {
+            const payload = {
+                form: {
+                    version: fVersion.value,
+                    id: fId.value,
+                    name: fName.value,
+                    desc: fDesc.value,
+                    goal: fGoal.value,
+                    risk: fRisk.value,
+                    trigType: fTrigType.value,
+                    trigSource: fTrigSource.value,
+                    dataOn: fDataOn.checked,
+                    sources: fSources.value,
+                    pii: fPii.value,
+                    canaryAllow: document.getElementById('fCanaryAllow').value,
+                    canaryBlock: document.getElementById('fCanaryBlock').value,
+                    stableBlock: document.getElementById('fStableBlock').value,
+                    deployStrategy: document.getElementById('fDeployStrategy').value,
+                    canaryPct: document.getElementById('fCanaryPct').value,
+                    shadowPct: document.getElementById('fShadowPct').value,
+                    costMax: document.getElementById('fCostMax').value,
+                    tokenMax: document.getElementById('fTokenMax').value
+                },
+                tools: collectTools(),
+                json: document.getElementById('jsonPreview').value
+            };
+            localStorage.setItem(LS_DRAFT, JSON.stringify(payload));
+            msg('Черновик сохранён в этом браузере.');
+        }
+
+        function loadDraft() {
+            try {
+                const raw = localStorage.getItem(LS_DRAFT);
+                if (!raw) { msg('Нет сохранённого черновика.', true); return; }
+                const p = JSON.parse(raw);
+                const f = p.form || {};
+                fVersion.value = f.version || '0.1.0';
+                fId.value = f.id || '';
+                fName.value = f.name || '';
+                fDesc.value = f.desc || '';
+                fGoal.value = f.goal || '';
+                fRisk.value = f.risk || 'low';
+                fTrigType.value = f.trigType || 'manual';
+                fTrigSource.value = f.trigSource || '';
+                fDataOn.checked = !!f.dataOn;
+                fSources.value = f.sources || '';
+                fPii.value = f.pii || 'none';
+                document.getElementById('fCanaryAllow').value = f.canaryAllow || '';
+                document.getElementById('fCanaryBlock').value = f.canaryBlock || '';
+                document.getElementById('fStableBlock').value = f.stableBlock || '';
+                document.getElementById('fDeployStrategy').value = f.deployStrategy || '';
+                document.getElementById('fCanaryPct').value = f.canaryPct || '';
+                document.getElementById('fShadowPct').value = f.shadowPct || '';
+                document.getElementById('fCostMax').value = f.costMax || '';
+                document.getElementById('fTokenMax').value = f.tokenMax || '';
+                document.getElementById('dataContractFields').style.display = fDataOn.checked ? 'block' : 'none';
+                toolsBody.innerHTML = '';
+                (p.tools && p.tools.length ? p.tools : [defaultToolRow()]).forEach(t => addToolRow(t));
+                if (p.json) document.getElementById('jsonPreview').value = p.json;
+                else buildPreview();
+                msg('Черновик загружен.');
+            } catch (e) {
+                msg('Ошибка чтения черновика: ' + e.message, true);
+            }
+        }
+
+        function applyTemplate() {
+            fId.value = 'support-demo-' + Date.now().toString(36);
+            fName.value = 'Customer support (шаблон)';
+            fGoal.value = 'Обработать обращение клиента с проверкой заказа и ответом в тоне бренда.';
+            fTrigType.value = 'event';
+            fTrigSource.value = 'user.request';
+            fRisk.value = 'low';
+            toolsBody.innerHTML = '';
+            addToolRow({ id: 'web-search-tool', name: 'Web Search Tool', version: '1.0.0', riskClass: 'low', requiresApproval: false });
+            addToolRow({ id: 'api-call-tool', name: 'API Call Tool', version: '1.0.0', riskClass: 'medium', requiresApproval: false });
+            buildPreview();
+            msg('Подставлен шаблон support (2 инструмента).');
+        }
+
+        document.getElementById('fDataOn').addEventListener('change', (e) => {
+            document.getElementById('dataContractFields').style.display = e.target.checked ? 'block' : 'none';
+            buildPreview();
+        });
+
+        document.getElementById('addToolRow').addEventListener('click', () => { addToolRow(); buildPreview(); });
+        document.getElementById('btnBuild').addEventListener('click', () => { buildPreview(); msg('Превью обновлено.'); });
+        document.getElementById('btnSaveDraft').addEventListener('click', () => { buildPreview(); saveDraft(); });
+        document.getElementById('btnLoadDraft').addEventListener('click', loadDraft);
+        document.getElementById('btnTemplate').addEventListener('click', applyTemplate);
+        document.getElementById('btnClearDraft').addEventListener('click', () => {
+            if (!confirm('Сбросить форму и очистить черновик в localStorage?')) return;
+            localStorage.removeItem(LS_DRAFT);
+            location.reload();
+        });
+        document.getElementById('btnCopy').addEventListener('click', async () => {
+            buildPreview();
+            try {
+                await navigator.clipboard.writeText(document.getElementById('jsonPreview').value);
+                msg('JSON скопирован в буфер обмена.');
+            } catch {
+                msg('Не удалось скопировать — выделите текст в превью вручную.', true);
+            }
+        });
+
+        document.getElementById('btnToScenarios').addEventListener('click', () => {
+            buildPreview();
+            const json = document.getElementById('jsonPreview').value;
+            try {
+                JSON.parse(json);
+            } catch (e) {
+                msg('Исправьте форму: JSON не парсится — ' + e.message, true);
+                return;
+            }
+            localStorage.setItem(LS_PENDING_CREATE_SPEC, json);
+            window.location.href = '/admin-scenarios.html?openCreate=1';
+        });
+
+        document.getElementById('btnRememberForCreate').addEventListener('click', () => {
+            buildPreview();
+            const json = document.getElementById('jsonPreview').value;
+            try {
+                JSON.parse(json);
+            } catch (e) {
+                msg('Исправьте форму: JSON не парсится — ' + e.message, true);
+                return;
+            }
+            localStorage.setItem(LS_PENDING_CREATE_SPEC, json);
+            msg('JSON сохранён. На странице Scenarios откройте Create и нажмите «Подставить из конструктора».');
+        });
+
+        ['fVersion','fId','fName','fDesc','fGoal','fRisk','fDeployStrategy','fCanaryPct','fShadowPct','fCostMax','fTokenMax','fTrigType','fTrigSource','fSources','fPii','fCanaryAllow','fCanaryBlock','fStableBlock'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', buildPreview);
+            if (el) el.addEventListener('change', buildPreview);
+        });
+
+        window.addEventListener('load', () => {
+            if (localStorage.getItem(LS_DRAFT)) {
+                loadDraft();
+            } else {
+                addToolRow();
+                addToolRow({ id: 'api-call-tool', name: 'API Call Tool', version: '1.0.0', riskClass: 'medium', requiresApproval: false });
+                buildPreview();
+            }
+        });
+    </script>
+<script src="/admin-common-rbac.js"></script>
+</body>
+</html>

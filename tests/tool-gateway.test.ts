@@ -2,15 +2,21 @@
  * Тесты для Tool Gateway
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { ToolGateway, ToolRequest, ToolRequestContext } from '../src/gateway';
 import { ExecutionPolicy } from '../src/builder';
 import { RegisteredTool } from '../src/registry';
 import { RiskClass } from '../src/spec';
+import { OpaHttpClient } from '../src/policy/opa-http-client';
+import { systemMetrics } from '../src/observability/metrics';
 
 describe('ToolGateway', () => {
   let gateway: ToolGateway;
   let testTool: RegisteredTool;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   beforeEach(() => {
     gateway = new ToolGateway();
@@ -115,6 +121,38 @@ describe('ToolGateway', () => {
     expect(response.error?.code).toBe('ACCESS_DENIED');
   });
 
+  it('метрики: local policy denial с deployment_lane', async () => {
+    const spyDeny = vi.spyOn(systemMetrics.gatewayPolicyDenials, 'add');
+    const policy: ExecutionPolicy = {
+      allowedTools: ['other-tool'],
+      forbiddenActions: [],
+      requiresApproval: [],
+      rateLimits: {},
+      costLimits: {},
+      tokenLimits: {}
+    };
+    gateway.setPolicy(policy);
+    gateway.setSandboxMode(false);
+
+    await gateway.execute(
+      {
+        toolId: 'test-tool',
+        inputs: {},
+        context: {
+          scenarioId: 's',
+          executionId: 'e',
+          userId: 'u',
+          userRoles: ['user'],
+          deploymentLane: 'canary'
+        }
+      },
+      testTool,
+      async () => ({ success: true, outputs: {}, metadata: { latency: 0, timestamp: new Date().toISOString() } })
+    );
+
+    expect(spyDeny).toHaveBeenCalledWith(1, { layer: 'local', deployment_lane: 'canary' });
+    spyDeny.mockRestore();
+  });
 
   it('должен возвращать ошибку EXECUTOR_NOT_FOUND если executor не найден', async () => {
     gateway.setSandboxMode(false);
@@ -139,6 +177,193 @@ describe('ToolGateway', () => {
         message: 'No executor registered for tool: test-tool'
       }
     });
+  });
+
+  it('OPA может отклонить вызов после успешной локальной политики', async () => {
+    const policy: ExecutionPolicy = {
+      allowedTools: ['test-tool'],
+      forbiddenActions: [],
+      requiresApproval: [],
+      rateLimits: {},
+      costLimits: {},
+      tokenLimits: {}
+    };
+    gateway.setPolicy(policy);
+    gateway.setSandboxMode(false);
+    gateway.setOpaClient(new OpaHttpClient('http://127.0.0.1:8181', { failOpen: false }));
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ result: false }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      )
+    );
+
+    const context: ToolRequestContext = {
+      scenarioId: 'test-scenario',
+      executionId: 'test-exec',
+      userId: 'test-user',
+      userRoles: ['user']
+    };
+    const request: ToolRequest = {
+      toolId: 'test-tool',
+      inputs: {},
+      context
+    };
+
+    const response = await gateway.execute(
+      request,
+      testTool,
+      async () => ({ success: true, outputs: {}, metadata: { latency: 0, timestamp: new Date().toISOString() } })
+    );
+
+    expect(response.success).toBe(false);
+    expect(response.error?.code).toBe('ACCESS_DENIED');
+  });
+
+  it('метрики: OPA deny увеличивает gateway_opa_decisions и gateway_policy_denials', async () => {
+    const spyDeny = vi.spyOn(systemMetrics.gatewayPolicyDenials, 'add');
+    const spyOpa = vi.spyOn(systemMetrics.gatewayOpaDecisions, 'add');
+    const policy: ExecutionPolicy = {
+      allowedTools: ['test-tool'],
+      forbiddenActions: [],
+      requiresApproval: [],
+      rateLimits: {},
+      costLimits: {},
+      tokenLimits: {}
+    };
+    gateway.setPolicy(policy);
+    gateway.setSandboxMode(false);
+    gateway.setOpaClient(new OpaHttpClient('http://127.0.0.1:8181', { failOpen: false }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ result: false }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      )
+    );
+
+    await gateway.execute(
+      {
+        toolId: 'test-tool',
+        inputs: {},
+        context: {
+          scenarioId: 'test-scenario',
+          executionId: 'test-exec',
+          userId: 'test-user',
+          userRoles: ['user'],
+          deploymentLane: 'stable'
+        }
+      },
+      testTool,
+      async () => ({ success: true, outputs: {}, metadata: { latency: 0, timestamp: new Date().toISOString() } })
+    );
+
+    expect(spyOpa).toHaveBeenCalledWith(1, { result: 'deny', deployment_lane: 'stable' });
+    expect(spyDeny).toHaveBeenCalledWith(1, { layer: 'opa', deployment_lane: 'stable' });
+    spyDeny.mockRestore();
+    spyOpa.mockRestore();
+  });
+
+  it('OPA input содержит PII, risk, лимиты и cost_guard_exceeded', async () => {
+    const policy: ExecutionPolicy = {
+      allowedTools: ['test-tool'],
+      forbiddenActions: [],
+      requiresApproval: [],
+      rateLimits: {},
+      costLimits: { maxPerExecution: 10 },
+      tokenLimits: { maxPerExecution: 1000 },
+      scenarioPiiClassification: 'medium',
+      scenarioRiskClass: 'low',
+      canaryAllowedTools: ['test-tool'],
+      canaryBlockedToolIds: ['prod-delete'],
+      stableBlockedToolIds: ['beta-integration']
+    };
+    gateway.setPolicy(policy);
+    gateway.setSandboxMode(false);
+    gateway.setOpaClient(new OpaHttpClient('http://127.0.0.1:8181', { failOpen: false }));
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ result: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const context: ToolRequestContext = {
+      scenarioId: 'test-scenario',
+      executionId: 'test-exec',
+      userId: 'test-user',
+      userRoles: ['user'],
+      costGuardExceeded: true
+    };
+    const request: ToolRequest = {
+      toolId: 'test-tool',
+      inputs: {},
+      context
+    };
+
+    await gateway.execute(
+      request,
+      testTool,
+      async () => ({ success: true, outputs: {}, metadata: { latency: 0, timestamp: new Date().toISOString() } })
+    );
+
+    expect(fetchMock).toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { input: Record<string, unknown> };
+    expect(body.input.scenarioPiiClassification).toBe('medium');
+    expect(body.input.scenarioRiskClass).toBe('low');
+    expect(body.input.toolRiskClass).toBe('low');
+    expect(body.input.costLimits).toEqual({ maxPerExecution: 10 });
+    expect(body.input.tokenLimits).toEqual({ maxPerExecution: 1000 });
+    expect(body.input.cost_guard_exceeded).toBe(true);
+    expect(body.input.canaryAllowedTools).toEqual(['test-tool']);
+    expect(body.input.canaryBlockedToolIds).toEqual(['prod-delete']);
+    expect(body.input.stableBlockedToolIds).toEqual(['beta-integration']);
+  });
+
+  it('OPA input: при high PII userId и executionId маскируются', async () => {
+    const policy: ExecutionPolicy = {
+      allowedTools: ['test-tool'],
+      forbiddenActions: [],
+      requiresApproval: [],
+      rateLimits: {},
+      costLimits: {},
+      tokenLimits: {},
+      scenarioPiiClassification: 'high',
+      scenarioRiskClass: 'low'
+    };
+    gateway.setPolicy(policy);
+    gateway.setSandboxMode(false);
+    gateway.setOpaClient(new OpaHttpClient('http://127.0.0.1:8181', { failOpen: false }));
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ result: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request: ToolRequest = {
+      toolId: 'test-tool',
+      inputs: {},
+      context: {
+        scenarioId: 'test-scenario',
+        executionId: 'secret-exec-id',
+        userId: 'secret-user',
+        userRoles: ['user'],
+        tenantId: 'corp-tenant'
+      }
+    };
+
+    await gateway.execute(
+      request,
+      testTool,
+      async () => ({ success: true, outputs: {}, metadata: { latency: 0, timestamp: new Date().toISOString() } })
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { input: Record<string, string> };
+    expect(body.input.userId).toBe('[REDACTED]');
+    expect(body.input.executionId).toBe('[REDACTED]');
+    expect(body.input.scenarioPiiClassification).toBe('high');
+    expect(body.input.tenantId).toBe('corp-tenant');
   });
 
   it('должен применять rate limiting', async () => {

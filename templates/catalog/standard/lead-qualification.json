@@ -1,0 +1,58 @@
+{
+  "version": "0.1.0",
+  "id": "tpl-lead-qualification",
+  "name": "Lead Qualification",
+  "description": "Score and qualify inbound leads using LLM analysis and CRM enrichment",
+  "goal": "Automatically qualify leads by enriching company data and scoring fit",
+  "category": "standard",
+  "difficulty": "medium",
+  "tags": ["sales", "crm", "lead-scoring"],
+  "kpi": [
+    { "name": "scoring_accuracy", "target": 0.80, "unit": "percentage" }
+  ],
+  "triggers": [
+    { "type": "event", "source": "crm.leads", "config": { "eventType": "lead_created" } }
+  ],
+  "allowedActions": [
+    {
+      "id": "get-lead-data",
+      "name": "Get Lead Data",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "enrich-company-info",
+      "name": "Enrich Company Info",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false,
+      "rateLimit": 30
+    },
+    {
+      "id": "score-lead",
+      "name": "Score Lead",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "update-crm",
+      "name": "Update CRM Record",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    }
+  ],
+  "riskClass": "low",
+  "nonFunctional": {
+    "sla": { "availability": 0.99, "latency": { "p95": 10000 } },
+    "cost": { "maxPerExecution": 0.12 },
+    "tokenBudget": { "maxPerExecution": 4000 }
+  },
+  "observability": {
+    "metrics": ["execution_time", "scoring_accuracy", "leads_processed"],
+    "alerts": [{ "name": "low_accuracy", "condition": "scoring_accuracy < 0.70", "severity": "warning" }]
+  },
+  "owner": "platform-team"
+}

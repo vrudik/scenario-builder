@@ -6,9 +6,15 @@ on:
   pull_request:
 
 jobs:
+  # windows-latest: сценарии без shell для tsx/prisma (tests/scenarios-api.test.ts);
+  # demo-api-smoke — windowsHide + taskkill дерева процесса после теста.
   validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -32,6 +38,60 @@ jobs:
       - name: Test
         run: npm test -- --run
 
+      - name: OPA policy tests + bundle (Linux)
+        if: runner.os != 'Windows'
+        run: |
+          curl -sSL -o opa https://openpolicyagent.org/downloads/v0.69.0/opa_linux_amd64_static
+          chmod +x opa
+          ./opa test policies/
+          ./opa build -b policies/ -o /tmp/opa-policy-bundle.tar.gz
+          test -s /tmp/opa-policy-bundle.tar.gz
+
+      - name: OPA policy tests + bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://openpolicyagent.org/downloads/v0.69.0/opa_windows_amd64.exe" -OutFile "opa.exe"
+          .\opa.exe test policies/
+          $bundle = Join-Path $env:TEMP "opa-policy-bundle.tar.gz"
+          .\opa.exe build -b policies/ -o $bundle
+          if (-not (Test-Path $bundle) -or ((Get-Item $bundle).Length -eq 0)) { throw "bundle missing or empty" }
+
       - name: Lint (non-blocking for now)
         continue-on-error: true
         run: npm run lint
+
+  # Сборка Docker-образа (без push в registry)
+  docker-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker build
+        run: docker build -t scenario-builder:ci .
+
+  # Валидность compose для staging (без запуска контейнеров)
+  staging-compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.staging.yml
+        run: docker compose -f docker-compose.staging.yml config
+
+      - name: Validate docker-compose.staging.ghcr.yml
+        run: STAGING_GHCR_IMAGE=ghcr.io/ci/validate:local docker compose -f docker-compose.staging.ghcr.yml config
+
+  dev-infra-compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.dev-infra.yml
+        run: docker compose -f docker-compose.dev-infra.yml config

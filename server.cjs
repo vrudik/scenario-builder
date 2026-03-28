@@ -2,6 +2,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // Устанавливаем DATABASE_URL по умолчанию для Prisma
 if (!process.env.DATABASE_URL) {
@@ -9,6 +10,169 @@ if (!process.env.DATABASE_URL) {
 }
 
 const PORT = 3000;
+
+/** Multi-tenant: заголовок X-Tenant-ID (1–64 символов, [a-zA-Z0-9._-]); иначе default */
+function resolveTenantId(req) {
+  const h = req.headers['x-tenant-id'];
+  const raw = (Array.isArray(h) ? h[0] : h) || '';
+  const s = String(raw).trim();
+  if (s === '' || !/^[a-zA-Z0-9._-]{1,64}$/.test(s)) {
+    return 'default';
+  }
+  return s;
+}
+
+// ---------------------------------------------------------------------------
+// Auth layer (API key + admin password)
+// AUTH_MODE: off (default) | optional | required
+// ---------------------------------------------------------------------------
+const AUTH_MODE = (process.env.AUTH_MODE || 'off').toLowerCase().trim();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const KEY_PREFIX_RE = /^sb_(live|test)_[a-f0-9]{64}$/;
+
+/**
+ * Check if req.auth has the required scope. scopes:null = all.
+ * Returns true if scope is satisfied, false otherwise.
+ */
+function requireScope(req, res, scope) {
+  const identity = req.auth;
+  if (!identity) {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Authentication required' }));
+    return false;
+  }
+  if (identity.scopes === null) return true; // null = all scopes (superuser)
+  if (identity.scopes.includes(scope)) return true;
+  res.writeHead(403, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: `Insufficient scope: ${scope} required` }));
+  return false;
+}
+
+function classifyExecutionError(execution) {
+  if (!execution) return { category: 'unknown', message: 'Execution not found', actions: [] };
+  if (execution.status !== 'failed' && execution.status !== 'compensated') {
+    return { category: 'none', message: 'Execution is not in error state', actions: [] };
+  }
+
+  const err = (execution.errorMessage || execution.error || '').toLowerCase();
+  const code = (execution.errorCode || '').toLowerCase();
+
+  let category = 'unknown';
+  let message = execution.errorMessage || 'Unknown error';
+  let actions = ['retry'];
+
+  if (code.includes('config') || err.includes('configuration') || err.includes('missing') || err.includes('invalid spec')) {
+    category = 'config';
+    message = 'Configuration error: ' + (execution.errorMessage || 'Check scenario spec and tool configuration');
+    actions = ['edit_scenario', 'view_spec'];
+  } else if (code.includes('policy') || err.includes('denied') || err.includes('opa') || err.includes('blocked')) {
+    category = 'policy';
+    message = 'Policy violation: ' + (execution.errorMessage || 'OPA policy denied the operation');
+    actions = ['view_opa_decision', 'edit_scenario'];
+  } else if (code.includes('tool') || err.includes('tool') || err.includes('timeout') || err.includes('api call')) {
+    category = 'tool';
+    message = 'Tool failure: ' + (execution.errorMessage || 'External tool call failed');
+    actions = ['retry', 'view_trace'];
+  } else if (code.includes('agent') || err.includes('llm') || err.includes('model') || err.includes('token')) {
+    category = 'agent';
+    message = 'Agent/LLM error: ' + (execution.errorMessage || 'Agent runtime encountered an error');
+    actions = ['retry', 'view_trace'];
+  } else if (err.includes('connect') || err.includes('network') || err.includes('econnrefused') || err.includes('unavailable')) {
+    category = 'infrastructure';
+    message = 'Infrastructure error: ' + (execution.errorMessage || 'Service connectivity issue');
+    actions = ['retry', 'check_health'];
+  }
+
+  return {
+    category,
+    message,
+    actions,
+    errorCode: execution.errorCode || null,
+    executionId: execution.executionId || execution.id,
+  };
+}
+
+function hashApiKey(raw) {
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+/** Lazy-loaded Prisma client (ESM dynamic import from CJS). */
+let _prismaPromise = null;
+function getPrisma() {
+  if (!_prismaPromise) {
+    _prismaPromise = import('@prisma/client').then(mod => {
+      const client = new mod.PrismaClient();
+      return client;
+    });
+  }
+  return _prismaPromise;
+}
+
+/** In-memory key cache: hash → { identity, expiresAt } */
+const authKeyCache = new Map();
+const AUTH_CACHE_TTL = 60_000;
+
+/**
+ * Resolve auth from the request.
+ * Returns { ok, identity, error? } where identity has { method, keyId?, tenantId, roles, scopes }.
+ */
+async function resolveAuth(req) {
+  if (AUTH_MODE === 'off') {
+    return { ok: true, identity: { method: 'anonymous', tenantId: 'default', roles: ['admin'], scopes: null } };
+  }
+
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) {
+    if (AUTH_MODE === 'optional') {
+      return { ok: true, identity: { method: 'anonymous', tenantId: 'default', roles: ['viewer'], scopes: null } };
+    }
+    return { ok: false, identity: null, error: 'Authorization header required' };
+  }
+
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token) {
+    return { ok: false, identity: null, error: 'Empty bearer token' };
+  }
+
+  if (ADMIN_PASSWORD && token === ADMIN_PASSWORD) {
+    return { ok: true, identity: { method: 'admin_password', tenantId: 'default', roles: ['admin'], scopes: null } };
+  }
+
+  if (!KEY_PREFIX_RE.test(token)) {
+    return { ok: false, identity: null, error: 'Invalid API key format' };
+  }
+
+  const hash = hashApiKey(token);
+
+  const cached = authKeyCache.get(hash);
+  if (cached && Date.now() < cached.expiresAt) {
+    return { ok: true, identity: cached.identity };
+  }
+
+  try {
+    const prisma = await getPrisma();
+    const row = await prisma.apiKey.findUnique({ where: { keyHash: hash } });
+    if (!row) return { ok: false, identity: null, error: 'Unknown API key' };
+    if (row.revokedAt) return { ok: false, identity: null, error: 'API key revoked' };
+    if (row.expiresAt && row.expiresAt < new Date()) return { ok: false, identity: null, error: 'API key expired' };
+
+    let roles = ['user'];
+    try { roles = JSON.parse(row.roles); } catch {}
+    let scopes = null;
+    if (row.scopes) try { scopes = JSON.parse(row.scopes); } catch {}
+
+    const identity = { method: 'api_key', keyId: row.id, tenantId: row.tenantId, roles, scopes };
+    authKeyCache.set(hash, { identity, expiresAt: Date.now() + AUTH_CACHE_TTL });
+
+    prisma.apiKey.update({ where: { keyHash: hash }, data: { lastUsedAt: new Date() } }).catch(() => {});
+    return { ok: true, identity };
+  } catch (err) {
+    if (AUTH_MODE === 'optional') {
+      return { ok: true, identity: { method: 'anonymous', tenantId: 'default', roles: ['viewer'], scopes: null } };
+    }
+    return { ok: false, identity: null, error: 'Auth service unavailable' };
+  }
+}
 
 // Хранилище метрик для экспорта
 let metricsStore = {
@@ -43,6 +207,49 @@ const demoState = {
   totalDurationMs: 0,
   totalCostUsd: 0,
   lastRun: null
+};
+
+// In-memory guardrails configuration (shared for full server runtime)
+let guardrailsConfig = {
+  sensitivity: 'medium',
+  risks: {
+    promptInjection: {
+      enabled: true,
+      label: 'Prompt Injection',
+      description:
+        'Блокировать попытки переписать системные инструкции или заставить агента игнорировать правила.'
+    },
+    insecureOutput: {
+      enabled: true,
+      label: 'Опасные команды в ответах',
+      description:
+        'Запрещать вывод реально опасных команд (rm -rf /, DROP TABLE и т.п.) в ответах модели.'
+    },
+    excessiveAgency: {
+      enabled: true,
+      label: 'Excessive Agency',
+      description:
+        'Ограничивать количество вызовов инструментов за один ответ, чтобы агент не делал слишком много действий автоматически.',
+      maxToolCallsPerResponse: 10
+    },
+    unauthorizedCode: {
+      enabled: true,
+      label: 'Опасные инструменты',
+      description:
+        'Блокировать инструменты, запускающие произвольный код/команды (system/exec/shell и подобные).'
+    },
+    dataLeakage: {
+      enabled: false,
+      label: 'Защита от утечки данных',
+      description:
+        'Дополнительные проверки на возможную утечку конфиденциальных данных из контекста и памяти.'
+    }
+  },
+  customPatterns: {
+    promptInjection: [],
+    insecureOutput: [],
+    toolInputDangerous: []
+  }
 };
 
 function getDemoMetricsSnapshot() {
@@ -195,7 +402,8 @@ function getReadinessPayload() {
     ...getHealthPayload(),
     checks: {
       staticAssetsAccessible: fs.existsSync(path.join(__dirname, 'admin-dashboard.html')),
-      apiStatusEndpointAvailable: true
+      apiStatusEndpointAvailable: true,
+      guardrailsConfigAvailable: true
     }
   };
 }
@@ -355,17 +563,64 @@ function checkOllama() {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
-  const pathname = url.pathname;
+  let pathname = url.pathname;
+
+  // API v1 prefix normalization: /api/v1/foo -> /api/foo internally
+  if (pathname.startsWith('/api/v1/')) {
+    pathname = '/api/' + pathname.slice(8);
+  } else if (pathname.startsWith('/api/') && !pathname.startsWith('/api/v1/')) {
+    res.setHeader('Deprecation', 'true');
+    res.setHeader('Sunset', 'Mon, 01 Mar 2027 00:00:00 GMT');
+  }
 
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Tenant-ID');
 
   if (req.method === 'OPTIONS') {
     res.writeHead(200);
     res.end();
     return;
+  }
+
+  // --- Public API routes (no auth required) ---
+  if (pathname === '/api/docs') {
+    const swaggerHtml = `<!DOCTYPE html>
+<html><head><title>Scenario Builder API Docs</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>SwaggerUIBundle({ url: '/api/openapi.json', dom_id: '#swagger-ui' });</script>
+</body></html>`;
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(swaggerHtml);
+    return;
+  }
+
+  if (pathname === '/api/openapi.json') {
+    try {
+      const specPath = path.join(__dirname, 'docs', 'api', 'openapi.json');
+      const spec = fs.readFileSync(specPath, 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(spec);
+    } catch (err) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'OpenAPI spec not found' }));
+    }
+    return;
+  }
+
+  // --- Auth middleware for /api/* routes ---
+  if (pathname.startsWith('/api/')) {
+    const auth = await resolveAuth(req);
+    if (!auth.ok) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: auth.error }));
+      return;
+    }
+    req.auth = auth.identity;
   }
 
   // Отладка: логируем запросы к admin-страницам
@@ -523,7 +778,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end('Error loading test event bus page: ' + error.message);
     }
-  } else if (pathname === '/admin-styles.css' || pathname === '/admin-common.js') {
+  } else if (pathname === '/admin-styles.css' || pathname === '/admin-common.js' || pathname === '/admin-common-rbac.js') {
     // Отдача общих ресурсов админ-панели (сначала из web/admin/, затем из корня)
     try {
       const fileName = pathname.startsWith('/') ? pathname.substring(1) : pathname;
@@ -790,12 +1045,12 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
     
     metricsReq.end();
   } else if (pathname === '/api/orchestrator/execute' && req.method === 'POST') {
-    // Выполнение workflow через Orchestrator
+    if (!requireScope(req, res, 'executions:write')) return;
     let body = '';
     req.on('data', chunk => { body += chunk.toString(); });
     req.on('end', async () => {
       try {
-        const requestData = JSON.parse(body);
+        const requestData = { ...JSON.parse(body), _tenantId: resolveTenantId(req) };
         const { scenarioId, userIntent, workflowType = 'agent-only' } = requestData;
         
         if (!scenarioId || !userIntent) {
@@ -865,7 +1120,7 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       }
     });
   } else if (pathname.startsWith('/api/event-bus/')) {
-    // Event Bus API endpoints - выполняем через tsx
+    if (!requireScope(req, res, 'config:write')) return;
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
@@ -980,7 +1235,7 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       }
     });
   } else if (pathname.startsWith('/api/queue-processor')) {
-    // API для управления Queue Processor
+    if (!requireScope(req, res, 'queues:write')) return;
     console.log('[DEBUG] Queue Processor API request:', req.method, pathname);
     const { exec } = require('child_process');
     const { promisify } = require('util');
@@ -1191,7 +1446,7 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       }));
     }
   } else if (pathname.startsWith('/api/eval')) {
-    // API для работы с eval-кейсами
+    if (!requireScope(req, res, 'executions:write')) return;
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
@@ -1359,7 +1614,8 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       }));
     }
   } else if (pathname.startsWith('/api/templates')) {
-    // API для работы с шаблонами сценариев
+    const tplScope = (req.method === 'GET') ? 'templates:read' : 'templates:write';
+    if (!requireScope(req, res, tplScope)) return;
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
@@ -1373,7 +1629,7 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         let requestData = {};
         
         if (req.method === 'GET') {
-          if (pathParts.length === 4 && pathParts[2] === 'apply') {
+          if (pathParts.length === 4 && pathParts[3] === 'apply') {
             // GET /api/templates/:id/apply?param1=value1&param2=value2
             command = 'apply-template';
             const url = new URL(req.url, `http://${req.headers.host}`);
@@ -1382,10 +1638,10 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
               params[key] = value;
             });
             requestData = {
-              templateId: pathParts[3],
+              templateId: pathParts[2],
               parameters: params
             };
-          } else if (pathParts.length === 4 && pathParts[2] === 'search') {
+          } else if (pathParts.length === 3 && pathParts[2] === 'search') {
             // GET /api/templates/search?category=pattern&tags=approval
             command = 'search-templates';
             const url = new URL(req.url, `http://${req.headers.host}`);
@@ -1403,14 +1659,23 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
             command = 'list-templates';
             requestData = {};
           }
-        } else if (req.method === 'POST' && pathParts.length === 4 && pathParts[2] === 'apply') {
+        } else if (req.method === 'POST' && pathParts.length === 4 && pathParts[3] === 'apply') {
           // POST /api/templates/:id/apply
           command = 'apply-template';
           const bodyData = body ? JSON.parse(body) : {};
           requestData = {
-            templateId: pathParts[3],
+            templateId: pathParts[2],
             parameters: bodyData.parameters || {},
             overrides: bodyData.overrides || {}
+          };
+        } else if (req.method === 'POST' && pathParts.length === 4 && pathParts[3] === 'instantiate') {
+          // POST /api/templates/:id/instantiate
+          command = 'instantiate';
+          const bodyData = body ? JSON.parse(body) : {};
+          requestData = {
+            templateId: pathParts[2],
+            name: bodyData.name || undefined,
+            description: bodyData.description || undefined
           };
         }
         
@@ -1422,6 +1687,8 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
           }));
           return;
         }
+        
+        requestData = { ...requestData, _tenantId: resolveTenantId(req) };
         
         // Выполняем через tsx
         const tempRequestFile = path.join(__dirname, `temp-templates-${Date.now()}.json`);
@@ -1500,7 +1767,10 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       }
     });
   } else if (pathname.startsWith('/api/queues')) {
-    // API для работы с очередями сценариев через БД
+    {
+      const qScope = (req.method === 'GET') ? 'queues:read' : 'queues:write';
+      if (!requireScope(req, res, qScope)) return;
+    }
       console.log('[DEBUG] Queues API request:', req.method, pathname);
       const { exec } = require('child_process');
       const { promisify } = require('util');
@@ -1541,6 +1811,8 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
                 offset: url.searchParams.get('offset'),
               };
             }
+            
+            requestData._tenantId = resolveTenantId(req);
             
             // Выполняем через tsx
             const tempRequestFile = path.join(__dirname, `temp-queues-${Date.now()}.json`);
@@ -1736,6 +2008,8 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
             return;
           }
           
+          requestData._tenantId = resolveTenantId(req);
+          
           // Выполняем через tsx
           const tempRequestFile = path.join(__dirname, `temp-queues-${Date.now()}.json`);
           fs.writeFileSync(tempRequestFile, JSON.stringify(requestData), 'utf-8');
@@ -1881,7 +2155,10 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       );
       return;
   } else if (pathname.startsWith('/api/scenarios')) {
-    // API для работы со сценариями через БД
+    {
+      const sScope = (req.method === 'GET') ? 'scenarios:read' : 'scenarios:write';
+      if (!requireScope(req, res, sScope)) return;
+    }
     console.log('[DEBUG] Scenarios API request:', req.method, pathname);
     const { exec } = require('child_process');
     const { promisify } = require('util');
@@ -1904,11 +2181,12 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
               executionStatus: url.searchParams.get('status'),
               limit: url.searchParams.get('limit'),
               offset: url.searchParams.get('offset'),
+              _tenantId: resolveTenantId(req)
             };
           } else if (pathParts.length === 3) {
             // GET /api/scenarios/:id
             command = 'get';
-            requestData = { id: pathParts[2] };
+            requestData = { id: pathParts[2], _tenantId: resolveTenantId(req) };
           } else {
             // GET /api/scenarios
             command = 'list';
@@ -1916,6 +2194,7 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
               status: url.searchParams.get('status'),
               limit: url.searchParams.get('limit'),
               offset: url.searchParams.get('offset'),
+              _tenantId: resolveTenantId(req)
             };
           }
           
@@ -2172,18 +2451,19 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         if (req.method === 'POST') {
           // POST /api/scenarios
           command = 'create';
-          requestData = body ? JSON.parse(body) : {};
+          requestData = { ...(body ? JSON.parse(body) : {}), _tenantId: resolveTenantId(req) };
         } else if (req.method === 'PUT') {
           // PUT /api/scenarios/:id
           command = 'update';
           requestData = {
             id: pathParts[2],
-            ...(body ? JSON.parse(body) : {})
+            ...(body ? JSON.parse(body) : {}),
+            _tenantId: resolveTenantId(req)
           };
         } else if (req.method === 'DELETE') {
           // DELETE /api/scenarios/:id
           command = 'delete';
-          requestData = { id: pathParts[2] };
+          requestData = { id: pathParts[2], _tenantId: resolveTenantId(req) };
         }
         
         if (!command) {
@@ -2500,8 +2780,34 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         res.end(JSON.stringify(errorResponse));
       }
     });
+  } else if (pathname.match(/^\/api\/executions\/[^/]+\/diagnosis$/) && req.method === 'GET') {
+    if (!requireScope(req, res, 'executions:read')) return;
+    try {
+      const executionId = pathname.split('/')[3];
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+      const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+      const scriptPath = path.join(__dirname, 'src', 'web', 'scenarios-api.ts');
+      const tempFile = path.join(__dirname, `temp-diag-${Date.now()}.json`);
+      fs.writeFileSync(tempFile, JSON.stringify({ executionId, _tenantId: resolveTenantId(req) }), 'utf-8');
+
+      const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "execution-get" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+      try { fs.unlinkSync(tempFile); } catch {}
+
+      let execution;
+      try { execution = JSON.parse(stdout); } catch { execution = null; }
+
+      const diagnosis = classifyExecutionError(execution);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(diagnosis));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
   } else if (pathname.startsWith('/api/executions')) {
-    // API для работы с выполнениями
+    if (!requireScope(req, res, 'executions:read')) return;
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
@@ -2515,14 +2821,28 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         let requestData = {};
         
         if (req.method === 'GET') {
-          if (pathParts.length === 4 && pathParts[3] === 'events') {
+          if (pathParts.length === 2 && pathParts[0] === 'api' && pathParts[1] === 'executions') {
+            // GET /api/executions?limit=&scenarioId=
+            command = 'execution-list-recent';
+            const lim = url.searchParams.get('limit');
+            const scen = url.searchParams.get('scenarioId');
+            requestData = {
+              limit: lim && lim.trim() !== '' ? lim : '40',
+              ...(scen && scen.trim() !== '' ? { scenarioId: scen.trim() } : {}),
+              _tenantId: resolveTenantId(req)
+            };
+          } else if (pathParts.length === 4 && pathParts[3] === 'unified-status') {
+            // GET /api/executions/:executionId/unified-status
+            command = 'execution-unified-status';
+            requestData = { executionId: pathParts[2], _tenantId: resolveTenantId(req) };
+          } else if (pathParts.length === 4 && pathParts[3] === 'events') {
             // GET /api/executions/:executionId/events
             command = 'execution-events';
-            requestData = { executionId: pathParts[2] };
+            requestData = { executionId: pathParts[2], _tenantId: resolveTenantId(req) };
           } else if (pathParts.length === 3) {
             // GET /api/executions/:executionId
             command = 'execution';
-            requestData = { executionId: pathParts[2] };
+            requestData = { executionId: pathParts[2], _tenantId: resolveTenantId(req) };
           }
         }
         
@@ -2583,6 +2903,42 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
     const statusCode = Object.values(readiness.checks).every(Boolean) ? 200 : 503;
     res.writeHead(statusCode, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(readiness));
+  } else if (pathname === '/api/guardrails/config' && req.method === 'GET') {
+    if (!requireScope(req, res, 'config:read')) return;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, config: guardrailsConfig }, null, 2));
+  } else if (pathname === '/api/guardrails/config' && req.method === 'POST') {
+    if (!requireScope(req, res, 'config:write')) return;
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        const parsed = body ? JSON.parse(body) : {};
+        guardrailsConfig = {
+          ...guardrailsConfig,
+          ...parsed,
+          risks: {
+            ...guardrailsConfig.risks,
+            ...(parsed.risks || {}),
+            excessiveAgency: {
+              ...guardrailsConfig.risks.excessiveAgency,
+              ...(parsed.risks && parsed.risks.excessiveAgency ? parsed.risks.excessiveAgency : {})
+            }
+          },
+          customPatterns: {
+            ...guardrailsConfig.customPatterns,
+            ...(parsed.customPatterns || {})
+          }
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, config: guardrailsConfig }, null, 2));
+      } catch (error) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: String(error) }));
+      }
+    });
   } else if (pathname === '/api/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -2601,7 +2957,7 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       }));
     });
   } else if (pathname === '/api/agent/execute' && req.method === 'POST') {
-    // Выполнение Agent Runtime через tsx
+    if (!requireScope(req, res, 'agent:execute')) return;
     let body = '';
     req.on('data', chunk => { body += chunk.toString(); });
     req.on('end', async () => {
@@ -2643,7 +2999,28 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         
         // Создаем временный файл с запросом
         const tempRequestFile = path.join(__dirname, 'temp-request.json');
-        fs.writeFileSync(tempRequestFile, JSON.stringify({ userIntent, scenarioId }), 'utf-8');
+        const headerTenantRaw = String(
+          (Array.isArray(req.headers['x-tenant-id'])
+            ? req.headers['x-tenant-id'][0]
+            : req.headers['x-tenant-id']) || ''
+        ).trim();
+        const tenantFromHeader =
+          headerTenantRaw && /^[a-zA-Z0-9._-]{1,64}$/.test(headerTenantRaw)
+            ? headerTenantRaw
+            : null;
+        const bodyTenant = requestData.tenantId ?? requestData._tenantId;
+        const bodyTenantStr =
+          bodyTenant != null && String(bodyTenant).trim() !== ''
+            ? String(bodyTenant).trim()
+            : '';
+        const tenantId =
+          tenantFromHeader ||
+          (bodyTenantStr && /^[a-zA-Z0-9._-]{1,64}$/.test(bodyTenantStr) ? bodyTenantStr : 'default');
+        fs.writeFileSync(
+          tempRequestFile,
+          JSON.stringify({ userIntent, scenarioId, tenantId, _tenantId: tenantId }),
+          'utf-8'
+        );
         
         // Выполняем Agent Runtime через tsx (используем локальный tsx из node_modules)
         const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
@@ -2749,6 +3126,368 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         }));
       }
     });
+
+  // -----------------------------------------------------------------------
+  // /api/audit/export — Audit log export
+  // -----------------------------------------------------------------------
+  } else if (pathname === '/api/audit/export' && req.method === 'GET') {
+    if (!requireScope(req, res, 'audit:export')) return;
+    try {
+      const params = {};
+      for (const [k, v] of url.searchParams) { params[k] = v; }
+      params.tenantId = params.tenantId || resolveTenantId(req);
+
+      const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+      const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+      const scriptPath = path.join(__dirname, 'src', 'web', 'audit-export.ts');
+      const tempFile = path.join(__dirname, `temp-audit-export-${Date.now()}.json`);
+      fs.writeFileSync(tempFile, JSON.stringify(params), 'utf-8');
+
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "export" "${tempFile}"`, { cwd: __dirname, timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
+      try { fs.unlinkSync(tempFile); } catch {}
+
+      const format = url.searchParams.get('format') || 'json';
+      const contentType = format === 'csv' ? 'text/csv' : 'application/json';
+      res.writeHead(200, { 'Content-Type': contentType });
+      res.end(stdout);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+
+  // -----------------------------------------------------------------------
+  // /api/audit/cleanup — Audit log retention cleanup
+  // -----------------------------------------------------------------------
+  } else if (pathname === '/api/audit/cleanup' && req.method === 'POST') {
+    if (!requireScope(req, res, 'admin:write')) return;
+    try {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+      const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+      const scriptPath = path.join(__dirname, 'src', 'web', 'audit-cleanup.ts');
+      const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}"`, { cwd: __dirname, timeout: 30000 });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(stdout);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+
+  // -----------------------------------------------------------------------
+  // /api/webhooks — Webhook endpoints CRUD + test delivery
+  // -----------------------------------------------------------------------
+  } else if (pathname.startsWith('/api/webhooks')) {
+    const wScope = (req.method === 'GET') ? 'config:read' : 'config:write';
+    if (!requireScope(req, res, wScope)) return;
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+
+        let requestData = {};
+        if (body) try { requestData = JSON.parse(body); } catch {}
+
+        const pathParts = pathname.split('/').filter(p => p);
+        const webhookId = pathParts[2] || null;
+        const subAction = pathParts[3] || null;
+        let command = '';
+
+        if (req.method === 'GET' && !webhookId) command = 'list';
+        else if (req.method === 'GET' && webhookId) { command = 'get'; requestData.id = webhookId; }
+        else if (req.method === 'POST' && !webhookId) command = 'create';
+        else if (req.method === 'POST' && subAction === 'test') { command = 'test'; requestData.id = webhookId; }
+        else if (req.method === 'PATCH' && webhookId) { command = 'update'; requestData.id = webhookId; }
+        else if (req.method === 'DELETE' && webhookId) { command = 'delete'; requestData.id = webhookId; }
+        else {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unknown webhook route' }));
+          return;
+        }
+
+        requestData.orgId = requestData.orgId || 'default';
+
+        const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+        const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+        const scriptPath = path.join(__dirname, 'src', 'web', 'webhook-api.ts');
+        const tempFile = path.join(__dirname, `temp-webhook-${Date.now()}.json`);
+        fs.writeFileSync(tempFile, JSON.stringify(requestData), 'utf-8');
+
+        const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "${command}" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+        try { fs.unlinkSync(tempFile); } catch {}
+
+        const status = (req.method === 'POST' && command === 'create') ? 201 : 200;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(stdout);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+
+  // -----------------------------------------------------------------------
+  // /api/usage — Usage metering and quota dashboard
+  // -----------------------------------------------------------------------
+  } else if (pathname.startsWith('/api/usage')) {
+    if (!requireScope(req, res, 'org:read')) return;
+    try {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+
+      let command = 'current';
+      const params = {};
+      for (const [k, v] of url.searchParams) { params[k] = v; }
+      params.orgId = params.orgId || 'default';
+
+      if (pathname.endsWith('/history')) command = 'history';
+      else if (pathname.endsWith('/breakdown')) command = 'breakdown';
+
+      const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+      const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+      const scriptPath = path.join(__dirname, 'src', 'web', 'usage-api.ts');
+      const tempFile = path.join(__dirname, `temp-usage-${Date.now()}.json`);
+      fs.writeFileSync(tempFile, JSON.stringify(params), 'utf-8');
+
+      const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "${command}" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+      try { fs.unlinkSync(tempFile); } catch {}
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(stdout);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+
+  // -----------------------------------------------------------------------
+  // /api/onboarding — Onboarding flow
+  // -----------------------------------------------------------------------
+  } else if (pathname.startsWith('/api/onboarding')) {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+
+        let command = '';
+        let requestData = {};
+        if (body) try { requestData = JSON.parse(body); } catch {}
+
+        if (pathname === '/api/onboarding/status' && req.method === 'GET') {
+          command = 'status';
+        } else if (pathname === '/api/onboarding/complete' && req.method === 'POST') {
+          command = 'complete';
+        } else if (pathname === '/api/onboarding/templates' && req.method === 'GET') {
+          command = 'templates';
+        } else {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unknown onboarding route' }));
+          return;
+        }
+
+        const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+        const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+        const scriptPath = path.join(__dirname, 'src', 'web', 'onboarding-api.ts');
+        const tempFile = path.join(__dirname, `temp-onboard-${Date.now()}.json`);
+        fs.writeFileSync(tempFile, JSON.stringify(requestData), 'utf-8');
+
+        const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "${command}" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+        try { fs.unlinkSync(tempFile); } catch {}
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(stdout);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+
+  // -----------------------------------------------------------------------
+  // /api/orgs — Org / Workspace / Member management
+  // -----------------------------------------------------------------------
+  } else if (pathname.startsWith('/api/orgs')) {
+    // Org/Workspace/Member management API
+    const orgScope = (req.method === 'GET') ? 'org:read' : 'org:write';
+    if (!requireScope(req, res, orgScope)) return;
+
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+
+        const pathParts = pathname.split('/').filter(p => p);
+        // /api/orgs -> ['api', 'orgs']
+        // /api/orgs/:id -> ['api', 'orgs', ':id']
+        // /api/orgs/:id/workspaces -> ['api', 'orgs', ':id', 'workspaces']
+        // /api/orgs/:id/members -> ['api', 'orgs', ':id', 'members']
+
+        let command = '';
+        let requestData = {};
+
+        if (body) {
+          try { requestData = JSON.parse(body); } catch {}
+        }
+
+        const orgId = pathParts[2] || null;
+        const subResource = pathParts[3] || null;
+        const subId = pathParts[4] || null;
+
+        if (!subResource && req.method === 'GET' && !orgId) {
+          command = 'org-list';
+        } else if (!subResource && req.method === 'GET' && orgId) {
+          command = 'org-get';
+          requestData.id = orgId;
+        } else if (!subResource && req.method === 'POST') {
+          command = 'org-create';
+        } else if (!subResource && req.method === 'PATCH' && orgId) {
+          command = 'org-update';
+          requestData.id = orgId;
+        } else if (subResource === 'workspaces' && req.method === 'GET' && !subId) {
+          command = 'workspace-list';
+          requestData.orgId = orgId;
+        } else if (subResource === 'workspaces' && req.method === 'POST') {
+          command = 'workspace-create';
+          requestData.orgId = orgId;
+        } else if (subResource === 'workspaces' && req.method === 'GET' && subId) {
+          command = 'workspace-get';
+          requestData.id = subId;
+        } else if (subResource === 'workspaces' && req.method === 'PATCH' && subId) {
+          command = 'workspace-update';
+          requestData.id = subId;
+        } else if (subResource === 'members' && req.method === 'GET') {
+          command = 'member-list';
+          requestData.orgId = orgId;
+        } else if (subResource === 'members' && req.method === 'POST') {
+          command = 'member-add';
+          requestData.orgId = orgId;
+        } else if (subResource === 'members' && req.method === 'PATCH' && subId) {
+          command = 'member-update';
+          requestData.id = subId;
+        } else if (subResource === 'members' && req.method === 'DELETE' && subId) {
+          command = 'member-remove';
+          requestData.id = subId;
+        } else {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unknown org route' }));
+          return;
+        }
+
+        const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+        const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+        const scriptPath = path.join(__dirname, 'src', 'web', 'org-api.ts');
+        const tempFile = path.join(__dirname, `temp-org-${Date.now()}.json`);
+        fs.writeFileSync(tempFile, JSON.stringify(requestData), 'utf-8');
+
+        const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "${command}" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+        try { fs.unlinkSync(tempFile); } catch {}
+
+        const status = (req.method === 'POST') ? 201 : 200;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(stdout);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+
+  // -----------------------------------------------------------------------
+  // /api/auth/keys — API key management
+  // -----------------------------------------------------------------------
+  } else if (pathname === '/api/auth/keys' && req.method === 'GET') {
+    if (!requireScope(req, res, 'admin:write')) return;
+    try {
+      const tenantId = resolveTenantId(req);
+      const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+      const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+      const scriptPath = path.join(__dirname, 'src', 'web', 'auth-api.ts');
+      const tempFile = path.join(__dirname, `temp-auth-${Date.now()}.json`);
+      fs.writeFileSync(tempFile, JSON.stringify({ tenantId }), 'utf-8');
+
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "list" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+      try { fs.unlinkSync(tempFile); } catch {}
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(stdout);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+
+  } else if (pathname === '/api/auth/keys' && req.method === 'POST') {
+    if (!requireScope(req, res, 'admin:write')) return;
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        data.tenantId = data.tenantId || resolveTenantId(req);
+
+        const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+        const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+        const scriptPath = path.join(__dirname, 'src', 'web', 'auth-api.ts');
+        const tempFile = path.join(__dirname, `temp-auth-${Date.now()}.json`);
+        fs.writeFileSync(tempFile, JSON.stringify(data), 'utf-8');
+
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "create" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+        try { fs.unlinkSync(tempFile); } catch {}
+
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(stdout);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+
+  } else if (pathname.startsWith('/api/auth/keys/') && req.method === 'DELETE') {
+    if (!requireScope(req, res, 'admin:write')) return;
+    try {
+      const keyId = pathname.split('/api/auth/keys/')[1];
+      if (!keyId) throw new Error('Key ID required');
+
+      const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+      const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+      const scriptPath = path.join(__dirname, 'src', 'web', 'auth-api.ts');
+      const tempFile = path.join(__dirname, `temp-auth-${Date.now()}.json`);
+      fs.writeFileSync(tempFile, JSON.stringify({ id: keyId }), 'utf-8');
+
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "revoke" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+      try { fs.unlinkSync(tempFile); } catch {}
+
+      authKeyCache.clear();
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(stdout);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+
+  } else if (pathname === '/api/auth/whoami' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ identity: req.auth || null, authMode: AUTH_MODE }));
+
   } else {
     res.writeHead(404);
     res.end('Not Found');
@@ -2791,6 +3530,138 @@ initializeObservability({
   }
 }
 
+// WebSocket: поток обновлений для admin-runs (subscribe → сервер опрашивает те же REST API)
+let adminRunsWss = null;
+try {
+  const { WebSocketServer, WebSocket } = require('ws');
+  adminRunsWss = new WebSocketServer({ noServer: true });
+  adminRunsWss.on('connection', (ws) => {
+    const state = {
+      executionId: '',
+      tenantId: 'default',
+      fastPoll: true,
+      livePanels: true
+    };
+    let tickTimer = null;
+    function clearTick() {
+      if (tickTimer) {
+        clearTimeout(tickTimer);
+        tickTimer = null;
+      }
+    }
+    function scheduleTick(ms) {
+      clearTick();
+      tickTimer = setTimeout(runTick, ms);
+    }
+    function lifecycleActive(ls) {
+      return ls === 'running' || ls === 'pending';
+    }
+    async function runTick() {
+      clearTick();
+      if (ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      const id = state.executionId;
+      if (!id) {
+        scheduleTick(4000);
+        return;
+      }
+      const base = `http://127.0.0.1:${PORT}`;
+      const headers = { 'X-Tenant-ID': state.tenantId };
+      const enc = encodeURIComponent(id);
+      try {
+        const opts = { headers };
+        const [uRes, exRes, evRes] = await Promise.all([
+          fetch(`${base}/api/executions/${enc}/unified-status`, opts),
+          fetch(`${base}/api/executions/${enc}`, opts),
+          fetch(`${base}/api/executions/${enc}/events`, opts)
+        ]);
+        const [uText, exText, evText] = await Promise.all([uRes.text(), exRes.text(), evRes.text()]);
+        function parseMaybe(t) {
+          try {
+            return JSON.parse(t);
+          } catch {
+            return { _parseError: true, _rawSnippet: t.slice(0, 200) };
+          }
+        }
+        const uData = parseMaybe(uText);
+        const exData = parseMaybe(exText);
+        const evData = parseMaybe(evText);
+        let ls = '';
+        if (uData && uData.success && uData.unifiedStatus && uData.unifiedStatus.lifecycleStatus) {
+          ls = uData.unifiedStatus.lifecycleStatus;
+        }
+        ws.send(
+          JSON.stringify({
+            type: 'tick',
+            unified: { ok: uRes.ok, status: uRes.status, data: uData },
+            execution: { ok: exRes.ok, status: exRes.status, data: exData },
+            events: { ok: evRes.ok, status: evRes.status, data: evData },
+            lifecycleStatus: ls
+          })
+        );
+        let delay = 5000;
+        if (lifecycleActive(ls)) {
+          delay = state.fastPoll ? 1500 : 2000;
+        }
+        scheduleTick(delay);
+      } catch (e) {
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            message: e instanceof Error ? e.message : String(e)
+          })
+        );
+        scheduleTick(5000);
+      }
+    }
+    ws.on('message', (raw) => {
+      let msg;
+      try {
+        msg = JSON.parse(String(raw));
+      } catch {
+        return;
+      }
+      if (msg.type !== 'subscribe') {
+        return;
+      }
+      const ex = String(msg.executionId || '').trim().slice(0, 256);
+      const ten = String(msg.tenant || msg.tenantId || 'default').trim();
+      state.executionId = ex;
+      if (!ten || !/^[a-zA-Z0-9._-]{1,64}$/.test(ten)) {
+        state.tenantId = 'default';
+      } else {
+        state.tenantId = ten;
+      }
+      state.fastPoll = msg.fastPoll !== false && msg.fastPoll !== 'false';
+      state.livePanels = msg.livePanels !== false && msg.livePanels !== 'false';
+      scheduleTick(80);
+    });
+    ws.on('close', () => clearTick());
+    ws.on('error', () => clearTick());
+  });
+
+  server.on('upgrade', (request, socket, head) => {
+    const host = request.headers.host || '127.0.0.1';
+    let pathname = '';
+    try {
+      pathname = new URL(request.url || '/', `http://${host}`).pathname;
+    } catch {
+      socket.destroy();
+      return;
+    }
+    if (pathname !== '/ws/admin-runs') {
+      socket.destroy();
+      return;
+    }
+    adminRunsWss.handleUpgrade(request, socket, head, (ws) => {
+      adminRunsWss.emit('connection', ws, request);
+    });
+  });
+} catch (e) {
+  console.warn('[ws] пакет ws не установлен, /ws/admin-runs отключён:', e.message);
+}
+
 server.listen(PORT, '0.0.0.0', async () => {
   // Инициализируем observability при старте
   await initializeServerObservability();
@@ -2820,16 +3691,40 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log('   GET  /api/scenarios - список сценариев');
   console.log('   POST /api/scenarios - создать сценарий');
   console.log('   GET  /api/scenarios/:id - получить сценарий');
+  console.log('   GET  /api/executions?limit=40&scenarioId=… - последние выполнения из БД (заголовок X-Tenant-ID)');
   console.log('   GET  /api/executions/:id - получить выполнение');
+  console.log('   GET  /api/executions/:id/unified-status - единый статус (БД + Temporal)');
+  console.log('   WS   /ws/admin-runs - live-обновления для admin-runs (при установленном пакете ws)');
+  console.log('   http://localhost:' + PORT + '/admin-runs.html - трекер выполнений (UI)');
+  console.log('   http://localhost:' + PORT + '/admin-spec-studio.html - конструктор Scenario Spec (форма + JSON)');
   console.log('   GET  /api/queues - список очередей');
   console.log('   POST /api/queues - создать очередь');
   console.log('   GET  /api/queues/:id - получить очередь');
   console.log('   POST /api/queues/:id/triggers - добавить триггер');
   console.log('   POST /api/queues/:id/jobs - добавить задание');
+  console.log('   GET  /api/audit/export - экспорт аудит-лога (json/csv/ndjson)');
+  console.log('   POST /api/audit/cleanup - очистка старых аудит-записей');
+  console.log('   GET  /api/auth/whoami - текущая идентификация');
+  console.log('   GET  /api/auth/keys - список API-ключей');
+  console.log('   POST /api/auth/keys - создать API-ключ');
+  console.log('   DELETE /api/auth/keys/:id - отозвать API-ключ');
+  console.log('');
+  console.log('🔑 Auth mode: ' + AUTH_MODE + (ADMIN_PASSWORD ? ' (admin password set)' : ''));
   console.log('   См. API_DOCUMENTATION.md для полной документации');
   console.log('========================================');
   console.log('⏹️  Для остановки: Ctrl+C');
   console.log('========================================');
+
+  // --- Startup validation ---
+  if (AUTH_MODE !== 'off' && !ADMIN_PASSWORD) {
+    console.warn('⚠️  AUTH_MODE=' + AUTH_MODE + ' but ADMIN_PASSWORD is not set. Bootstrap API keys via DB seed.');
+  }
+  if (process.env.NODE_ENV === 'production' && process.env.OPA_FAIL_OPEN === 'true') {
+    console.warn('⚠️  OPA_FAIL_OPEN=true in production — policy violations will be silently allowed!');
+  }
+  if (process.env.NODE_ENV === 'production' && AUTH_MODE === 'off') {
+    console.warn('⚠️  AUTH_MODE=off in production — all API endpoints are publicly accessible!');
+  }
 });
 
 server.on('error', (err) => {

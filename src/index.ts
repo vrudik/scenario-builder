@@ -9,3 +9,4 @@ export * from './gateway';
 export * from './runtime';
 export * from './eval';
 export * from './audit';
+export * from './policy';

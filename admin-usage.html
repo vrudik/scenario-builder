@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Usage Dashboard — Scenario Builder</title>
+  <link rel="stylesheet" href="/admin-styles.css">
+</head>
+<body>
+  <div class="admin-container">
+    <nav class="admin-nav">
+      <a href="/admin">← Back to Admin</a>
+      <h1>Usage Dashboard</h1>
+    </nav>
+    <main class="admin-main">
+      <section id="usage-summary">
+        <h2>Current Period Usage</h2>
+        <div id="usage-bars"></div>
+      </section>
+      <section id="usage-history">
+        <h2>History</h2>
+        <div id="history-chart"></div>
+      </section>
+    </main>
+  </div>
+  <script>
+    async function loadUsage() {
+      try {
+        const res = await fetch('/api/usage');
+        const data = await res.json();
+        const container = document.getElementById('usage-bars');
+        if (!Array.isArray(data) || data.length === 0) {
+          container.innerHTML = '<p>No usage data yet.</p>';
+          return;
+        }
+        container.innerHTML = data.map(function(r) {
+          return '<div class="usage-bar"><strong>' + r.metric + '</strong>: ' + r.value + ' (' + r.period + ')</div>';
+        }).join('');
+      } catch (e) {
+        document.getElementById('usage-bars').innerHTML = '<p>Error loading usage data.</p>';
+      }
+    }
+    loadUsage();
+  </script>
+  <script src="/admin-common-rbac.js"></script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+{
+  "version": "0.1.0",
+  "id": "tpl-ticket-triage",
+  "name": "Customer Ticket Triage",
+  "description": "Classify and route customer support tickets using LLM agent",
+  "goal": "Automatically classify incoming ticket and route to the correct team",
+  "category": "starter",
+  "difficulty": "simple",
+  "tags": ["support", "starter", "classification"],
+  "kpi": [
+    { "name": "classification_accuracy", "target": 0.9, "unit": "percentage" },
+    { "name": "triage_time", "target": 5000, "unit": "milliseconds" }
+  ],
+  "triggers": [
+    { "type": "event", "source": "support.tickets", "config": { "eventType": "ticket_created" } }
+  ],
+  "allowedActions": [
+    {
+      "id": "get-ticket",
+      "name": "Get Ticket Details",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "classify-ticket",
+      "name": "Classify Ticket",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    }
+  ],
+  "riskClass": "low",
+  "nonFunctional": {
+    "sla": { "availability": 0.99, "latency": { "p95": 5000 } },
+    "cost": { "maxPerExecution": 0.05 },
+    "tokenBudget": { "maxPerExecution": 2000 }
+  },
+  "observability": {
+    "metrics": ["execution_time", "classification_accuracy"],
+    "alerts": [{ "name": "low_accuracy", "condition": "classification_accuracy < 0.8", "severity": "warning" }]
+  },
+  "owner": "platform-team"
+}

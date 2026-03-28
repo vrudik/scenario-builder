@@ -4,15 +4,19 @@
  */
 
 import { Orchestrator, ExecutionContext } from '../runtime/orchestrator';
-import { AgentRuntime, LLMConfig } from '../agent/agent-runtime';
+import { TemporalClient } from '../runtime/temporal-client';
+import { AgentRuntime } from '../agent/agent-runtime';
+import { loadLlmConfigFromEnv } from '../agent/llm-config-from-env';
 import { ToolGateway } from '../gateway/tool-gateway';
 import { ToolRegistry } from '../registry/tool-registry';
 import { ScenarioBuilder } from '../builder/scenario-builder';
 import { ScenarioSpecValidator, TriggerType, RiskClass } from '../spec/scenario-spec';
 import { WorkflowNode } from '../builder/workflow-graph';
 import { registerAllTools } from '../tools';
+import { OpaHttpClient } from '../policy/opa-http-client';
 import { KafkaEventBus, IEventBus } from '../events';
 import { ExecutionRepository, NodeExecutionRepository } from '../db/repositories';
+import { normalizeTenantId } from '../utils/tenant-id';
 import * as fs from 'fs';
 
 // Перенаправляем все логи в stderr
@@ -39,6 +43,7 @@ async function main() {
     }
     
     const requestData = JSON.parse(fs.readFileSync(requestFile, 'utf-8'));
+    const tenantId = normalizeTenantId(requestData._tenantId ?? requestData.tenantId);
     const { scenarioId, userIntent, workflowType = 'agent-only' } = requestData;
     
     if (!scenarioId || !userIntent) {
@@ -49,15 +54,19 @@ async function main() {
     const registry = new ToolRegistry();
     const gateway = new ToolGateway();
     registerAllTools(registry, gateway);
+
+    const opaUrl = process.env.OPA_URL?.trim();
+    if (opaUrl) {
+      gateway.setOpaClient(
+        new OpaHttpClient(opaUrl, {
+          failOpen: process.env.OPA_FAIL_OPEN !== 'false',
+          timeoutMs: Number.parseInt(process.env.OPA_TIMEOUT_MS || '2500', 10) || 2500
+        })
+      );
+      console.log(`[Orchestrator] OPA policy engine: ${opaUrl}`);
+    }
     
-    // Создание Agent Runtime
-    const llmConfig: LLMConfig = {
-      provider: 'ollama',
-      model: 'llama3.2:1b',
-      baseUrl: 'http://localhost:11434',
-      temperature: 0.7,
-      maxTokens: 2000
-    };
+    const llmConfig = loadLlmConfigFromEnv();
     const agentRuntime = new AgentRuntime(gateway, llmConfig);
     
     // Создание Event Bus (опционально, если Kafka настроен)
@@ -98,14 +107,23 @@ async function main() {
       // Продолжаем выполнение без БД
     }
     
-    // Создание Orchestrator
+    let temporalClient: TemporalClient | undefined;
+    const useTemporal = process.env.USE_TEMPORAL === 'true' || process.env.USE_TEMPORAL === '1';
+    if (useTemporal) {
+      const addr = process.env.TEMPORAL_ADDRESS?.trim() || 'localhost:7233';
+      temporalClient = new TemporalClient();
+      await temporalClient.connect(addr);
+      console.log(`[Orchestrator] Temporal client connected: ${addr}`);
+    }
+
     const orchestrator = new Orchestrator(
       gateway,
       agentRuntime,
       registry,
       eventBus,
       executionRepository,
-      nodeExecutionRepository
+      nodeExecutionRepository,
+      temporalClient
     );
     
     // Создание спецификации сценария
@@ -140,8 +158,10 @@ async function main() {
       riskClass: RiskClass.LOW
     });
     
-    // Компиляция Spec → Workflow Graph
+    // Политика исполнения из spec (allowed/forbidden tools) + опционально OPA поверх
     const builder = new ScenarioBuilder();
+    gateway.setPolicy(builder.generateExecutionPolicy(spec));
+
     let workflowGraph = builder.compile(spec);
     
     // Добавляем agent узел в зависимости от типа workflow
@@ -260,11 +280,13 @@ async function main() {
     
     // Выполнение workflow
     const executionId = await orchestrator.startExecution(executionContext);
-    
+
     // Получение состояния выполнения
     const state = orchestrator.getExecutionState(executionId);
     const eventHistory = orchestrator.getEventHistory(executionId);
-    
+    const unifiedStatus = await orchestrator.getUnifiedExecutionStatus(executionId);
+    const unifiedStatusResolved = await orchestrator.getUnifiedExecutionStatusResolved(executionId, tenantId);
+
     // Формируем результат
     const result = {
       success: state ? state.completed : false,
@@ -272,6 +294,8 @@ async function main() {
       currentNodeId: state?.currentNodeId || 'unknown',
       completed: state?.completed || false,
       failed: state?.failed || false,
+      deploymentLane: state?.deploymentLane,
+      deploymentStrategy: state?.deploymentStrategy,
       error: state?.error,
       nodeResults: state ? Array.from(state.nodeResults.values()).map(nr => ({
         nodeId: nr.nodeId,
@@ -287,7 +311,9 @@ async function main() {
         data: e.data,
         timestamp: e.timestamp.toISOString()
       })),
-      eventBusEnabled: eventBus ? eventBus.isConnected() : false
+      eventBusEnabled: eventBus ? eventBus.isConnected() : false,
+      unifiedStatus: unifiedStatus ?? undefined,
+      unifiedStatusResolved: unifiedStatusResolved ?? undefined
     };
     
     // Отключаем Event Bus перед завершением

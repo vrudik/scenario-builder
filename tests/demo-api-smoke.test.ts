@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'child_process';
+import path from 'node:path';
+import { platform } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const PORT = 3210;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
@@ -24,23 +27,48 @@ async function waitForServer(timeoutMs = 20000): Promise<void> {
   throw new Error(`Server did not start within ${timeoutMs}ms`);
 }
 
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const tsxCli = path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+const serverEntry = path.join(repoRoot, 'src', 'web', 'server.ts');
+
 describe('Demo API smoke e2e', () => {
   beforeAll(async () => {
-    serverProcess = spawn('npx', ['tsx', 'src/web/server.ts'], {
+    serverProcess = spawn(process.execPath, [tsxCli, serverEntry], {
+      cwd: repoRoot,
       env: { ...process.env, PORT: String(PORT) },
-      stdio: 'pipe'
+      // ignore stdout/stderr — иначе на Windows буфер pipe может забиться и зависнуть дочерний процесс
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true
     });
 
-    serverProcess.stderr.on('data', () => {
-      // глушим шум, но оставляем поток подключенным
+    serverProcess.stderr?.on('data', () => {
+      // drain
     });
 
-    await waitForServer();
-  }, 30000);
+    await waitForServer(platform() === 'win32' ? 35000 : 20000);
+  }, platform() === 'win32' ? 55000 : 35000);
 
   afterAll(() => {
-    if (serverProcess && !serverProcess.killed) {
-      serverProcess.kill('SIGTERM');
+    if (!serverProcess || serverProcess.killed) {
+      return;
+    }
+    const pid = serverProcess.pid;
+    try {
+      if (platform() === 'win32' && pid) {
+        try {
+          serverProcess.kill();
+        } catch {
+          /* ignore */
+        }
+        spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+          stdio: 'ignore',
+          windowsHide: true
+        });
+      } else {
+        serverProcess.kill('SIGTERM');
+      }
+    } catch {
+      serverProcess.kill();
     }
   });
 

@@ -19,6 +19,8 @@ model Scenario {
   version     String   @default("1.0.0")
   status      String   @default("draft") // draft, active, archived
   createdBy   String?
+  /** Изоляция multi-tenant; заголовок API: X-Tenant-ID */
+  tenantId    String   @default("default")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
@@ -30,6 +32,8 @@ model Scenario {
   
   @@index([status])
   @@index([createdAt])
+  @@index([tenantId])
+  @@index([tenantId, status])
 }
 
 // Шаблон сценария (Template Library)
@@ -41,6 +45,13 @@ model Template {
   spec        String   // JSON строка с ScenarioSpec
   scenarioId  String? // Если шаблон основан на существующем сценарии
   tags        String?  // JSON массив тегов
+  version     String   @default("1.0.0")
+  difficulty  String   @default("beginner") // beginner, intermediate, advanced
+  isPublished Boolean  @default(false)
+  mockConfig  String?  // JSON: mock tool configurations
+  guide       String?  // markdown guide text
+  /** Изоляция multi-tenant; заголовок API: X-Tenant-ID */
+  tenantId    String   @default("default")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
@@ -48,6 +59,8 @@ model Template {
   
   @@index([category])
   @@index([name])
+  @@index([tenantId])
+  @@index([tenantId, category])
 }
 
 // Выполнение сценария (Execution)
@@ -66,6 +79,14 @@ model Execution {
   failedAt      DateTime?
   errorMessage  String?
   errorCode     String?
+  /** in_memory | temporal — единая модель для API и БД */
+  runtimeKind          String   @default("in_memory")
+  temporalRunId        String?
+  temporalTaskQueue    String?
+  temporalStatusName   String?
+  temporalHistoryLength Int?
+  /** Денормализация tenant для фильтров без join; совпадает с scenario.tenantId */
+  tenantId             String   @default("default")
   
   // Связи
   scenario      Scenario        @relation(fields: [scenarioId], references: [id])
@@ -78,6 +99,8 @@ model Execution {
   @@index([status])
   @@index([startedAt])
   @@index([userId])
+  @@index([tenantId])
+  @@index([tenantId, startedAt])
 }
 
 // Событие выполнения (для восстановления состояния)
@@ -95,6 +118,21 @@ model ExecutionEvent {
   @@index([executionId])
   @@index([type])
   @@index([timestamp])
+}
+
+// Кэш успешного результата Temporal activity (идемпотентность при retry / рестарте воркера)
+model TemporalToolActivityResult {
+  id                  String   @id @default(uuid())
+  dedupKey            String   @unique
+  businessExecutionId String
+  nodeId              String
+  activityKind        String   @default("tool") // tool | agent
+  toolId              String?
+  outputsJson         String
+  createdAt           DateTime @default(now())
+
+  @@index([businessExecutionId])
+  @@map("temporal_tool_activity_result")
 }
 
 // Выполнение узла workflow
@@ -203,6 +241,8 @@ model AuditLog {
   details     String?  // JSON дополнительная нагрузка
   traceId     String?
   spanId      String?
+  orgId       String?
+  tenantId    String?
   timestamp   DateTime @default(now())
 
   @@index([action])
@@ -210,6 +250,88 @@ model AuditLog {
   @@index([resource])
   @@index([outcome])
   @@index([timestamp])
+  @@index([orgId, timestamp])
+  @@index([tenantId, timestamp])
+}
+
+// Организация (multi-tenant root)
+model Org {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  plan      String   @default("free")  // free, pro, business, enterprise
+  status    String   @default("active") // active, suspended, deleted
+  onboardingCompletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaces Workspace[]
+  members    OrgMember[]
+  apiKeys    ApiKey[]
+
+  @@index([slug])
+  @@index([status])
+}
+
+model Workspace {
+  id          String   @id @default(uuid())
+  orgId       String
+  name        String
+  slug        String
+  tenantId    String   @unique  // maps 1:1 to existing tenantId
+  environment String   @default("production") // production, staging, development
+  settings    String?  // JSON
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id])
+
+  @@unique([orgId, slug])
+  @@index([orgId])
+  @@index([tenantId])
+}
+
+model OrgMember {
+  id        String   @id @default(uuid())
+  orgId     String
+  userId    String
+  email     String
+  role      String   @default("viewer") // owner, admin, builder, operator, viewer
+  status    String   @default("active") // active, invited, suspended
+  invitedBy String?
+  joinedAt  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id])
+
+  @@unique([orgId, email])
+  @@unique([orgId, userId])
+  @@index([orgId])
+  @@index([email])
+}
+
+// API-ключи для аутентификации запросов к API
+model ApiKey {
+  id          String    @id @default(uuid())
+  name        String
+  keyPrefix   String    // first 8 chars for display (e.g. "sb_live_a")
+  keyHash     String    @unique // SHA-256 of full key
+  tenantId    String    @default("default")
+  createdBy   String    @default("system")
+  roles       String    @default("[\"admin\"]") // JSON array
+  scopes      String?   // JSON array; null = all scopes
+  orgId       String?
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  org         Org?      @relation(fields: [orgId], references: [id])
+
+  @@index([keyHash])
+  @@index([tenantId])
 }
 
 // Метрики (для истории)
@@ -233,6 +355,8 @@ model ScenarioQueue {
   priority    Int      @default(0) // чем выше, тем приоритетнее
   maxConcurrency Int   @default(10) // максимальное количество одновременных выполнений
   retryConfig String?  // JSON с настройками повторов
+  /** Изоляция multi-tenant; заголовок API: X-Tenant-ID */
+  tenantId    String   @default("default")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
@@ -243,6 +367,8 @@ model ScenarioQueue {
   @@index([status])
   @@index([priority])
   @@index([createdAt])
+  @@index([tenantId])
+  @@index([tenantId, status])
 }
 
 // Триггер очереди (связь между событиями и очередями)
@@ -299,4 +425,49 @@ model ScenarioJob {
   @@index([createdAt])
   @@index([eventId])
   @@index([correlationId])
+}
+
+model WebhookEndpoint {
+  id        String   @id @default(uuid())
+  orgId     String
+  url       String
+  events    String   // JSON array of event types
+  secret    String   // HMAC signing secret
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([active])
+}
+
+model UsageRecord {
+  id          String   @id @default(uuid())
+  orgId       String
+  workspaceId String?
+  tenantId    String   @default("default")
+  period      String   // YYYY-MM format
+  metric      String   // executions, tool_calls, llm_tokens, duration_ms, storage_bytes, api_calls
+  value       Float    @default(0)
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@unique([orgId, tenantId, period, metric])
+  @@index([orgId])
+  @@index([tenantId])
+  @@index([period])
+}
+
+model QuotaConfig {
+  id        String   @id @default(uuid())
+  orgId     String
+  metric    String
+  limitVal  Int      // renamed from 'limit' to avoid SQL keyword
+  period    String   @default("monthly") // monthly, daily
+  action    String   @default("warn") // warn, block, throttle
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, metric, period])
+  @@index([orgId])
 }

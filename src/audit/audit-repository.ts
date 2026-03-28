@@ -14,6 +14,8 @@ export interface AuditLogQuery {
   severity?: string;
   since?: Date;
   until?: Date;
+  orgId?: string;
+  tenantId?: string;
   limit?: number;
   offset?: number;
 }
@@ -34,6 +36,8 @@ export class AuditRepository {
         details: event.details ? JSON.stringify(event.details) : null,
         traceId: event.traceId ?? null,
         spanId: event.spanId ?? null,
+        orgId: event.orgId ?? null,
+        tenantId: event.tenantId ?? null,
       },
     });
     return this.toRecord(row);
@@ -60,6 +64,8 @@ export class AuditRepository {
     if (query.resource) where.resource = query.resource;
     if (query.outcome) where.outcome = query.outcome;
     if (query.severity) where.severity = query.severity;
+    if (query.orgId) where.orgId = query.orgId;
+    if (query.tenantId) where.tenantId = query.tenantId;
     if (query.since) where.timestamp = { ...((where.timestamp as object) || {}), gte: query.since };
     if (query.until) where.timestamp = { ...((where.timestamp as object) || {}), lte: query.until };
 
@@ -93,6 +99,8 @@ export class AuditRepository {
     details: string | null;
     traceId: string | null;
     spanId: string | null;
+    orgId: string | null;
+    tenantId: string | null;
     timestamp: Date;
   }): AuditLogRecord {
     return {
@@ -106,6 +114,8 @@ export class AuditRepository {
       details: row.details ? (JSON.parse(row.details) as Record<string, unknown>) : null,
       traceId: row.traceId,
       spanId: row.spanId,
+      orgId: row.orgId,
+      tenantId: row.tenantId,
       timestamp: row.timestamp,
     };
   }

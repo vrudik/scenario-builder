@@ -46,6 +46,29 @@ export class AuditService {
   }
 
   /**
+   * Auth events (success/failure/key lifecycle)
+   */
+  async logAuthEvent(params: {
+    action: typeof AuditAction.AUTH_SUCCESS | typeof AuditAction.AUTH_FAILURE | typeof AuditAction.API_KEY_CREATED | typeof AuditAction.API_KEY_REVOKED;
+    actor?: string;
+    outcome?: AuditOutcomeType;
+    details?: Record<string, unknown>;
+    orgId?: string;
+    tenantId?: string;
+  }): Promise<void> {
+    await this.log({
+      action: params.action,
+      actor: params.actor,
+      outcome: params.outcome ?? (params.action === AuditAction.AUTH_FAILURE ? AuditOutcome.FAILURE : AuditOutcome.SUCCESS),
+      severity: params.action === AuditAction.AUTH_FAILURE ? AuditSeverity.WARNING : AuditSeverity.INFO,
+      message: params.action,
+      details: params.details,
+      orgId: params.orgId,
+      tenantId: params.tenantId,
+    });
+  }
+
+  /**
    * Сценарий: старт
    */
   async logScenarioStarted(params: {

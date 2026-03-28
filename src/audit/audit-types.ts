@@ -29,6 +29,11 @@ export const AuditAction = {
   EVAL_CASE_STARTED: 'eval_case_started',
   EVAL_CASE_COMPLETED: 'eval_case_completed',
   EVAL_SUITE_COMPLETED: 'eval_suite_completed',
+  // Auth
+  AUTH_SUCCESS: 'auth_success',
+  AUTH_FAILURE: 'auth_failure',
+  API_KEY_CREATED: 'api_key_created',
+  API_KEY_REVOKED: 'api_key_revoked',
 } as const;
 
 export type AuditActionType = (typeof AuditAction)[keyof typeof AuditAction];
@@ -61,6 +66,8 @@ export interface AuditEventInput {
   details?: Record<string, unknown>;
   traceId?: string;
   spanId?: string;
+  orgId?: string;
+  tenantId?: string;
 }
 
 export interface AuditLogRecord {
@@ -74,5 +81,7 @@ export interface AuditLogRecord {
   details: Record<string, unknown> | null;
   traceId: string | null;
   spanId: string | null;
+  orgId: string | null;
+  tenantId: string | null;
   timestamp: Date;
 }

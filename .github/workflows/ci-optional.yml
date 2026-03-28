@@ -1,0 +1,105 @@
+# Опционально: ручной запуск (Actions → CI optional → Run workflow).
+# Чекбоксы: Temporal+OPA unit, Web E2E (server + OPA + smoke:agent). Хотя бы один должен быть включён.
+
+name: CI optional (Temporal, OPA, Web E2E)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_temporal_opa_smoke:
+        description: 'Temporal dev server + temporal vitest + opa test/bundle + полный npm test'
+        type: boolean
+        default: true
+      run_web_e2e_opa:
+        description: 'npm run e2e:smoke:opa (migrate, server.cjs, OPA, smoke:agent; порты 3000/8181)'
+        type: boolean
+        default: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Проверка выбора job
+        run: |
+          t="${{ github.event.inputs.run_temporal_opa_smoke }}"
+          w="${{ github.event.inputs.run_web_e2e_opa }}"
+          if [ "$t" != "true" ] && [ "$w" != "true" ]; then
+            echo 'Включите хотя бы один из job (run_temporal_opa_smoke или run_web_e2e_opa).'
+            exit 1
+          fi
+
+  temporal-opa-smoke:
+    needs: gate
+    if: ${{ github.event.inputs.run_temporal_opa_smoke == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Temporal CLI
+        run: |
+          curl -sSf https://temporal.download/cli.sh | sh
+          echo "$HOME/.temporalio/bin" >> $GITHUB_PATH
+
+      - name: Start Temporal dev server
+        run: temporal server start-dev --headless &
+
+      - name: Wait for gRPC port
+        run: npx --yes wait-on tcp:127.0.0.1:7233 -t 120000
+
+      - name: Temporal connection smoke (vitest)
+        env:
+          TEMPORAL_E2E: '1'
+          TEMPORAL_ADDRESS: '127.0.0.1:7233'
+        run: npx vitest run tests/temporal-server-smoke.test.ts
+
+      - name: OPA policy tests + bundle
+        run: |
+          curl -sSL -o opa https://openpolicyagent.org/downloads/v0.69.0/opa_linux_amd64_static
+          chmod +x opa
+          ./opa test policies/
+          ./opa build -b policies/ -o /tmp/opa-policy-bundle.tar.gz
+          test -s /tmp/opa-policy-bundle.tar.gz
+
+      - name: Full unit suite (with Temporal test env)
+        run: npm test -- --run
+
+  web-e2e-opa:
+    needs: gate
+    if: ${{ github.event.inputs.run_web_e2e_opa == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      DATABASE_URL: 'file:./e2e-ci-opa.db'
+      ENABLE_EVENT_BUS: 'false'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: E2E smoke (OPA + server + agent)
+        run: npm run e2e:smoke:opa

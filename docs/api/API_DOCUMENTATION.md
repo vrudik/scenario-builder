@@ -127,6 +127,25 @@
 
 ## Executions API
 
+### GET /api/executions/:executionId/unified-status
+Единый статус выполнения по данным **Prisma** (работает после рестарта `server.cjs`). Для `runtimeKind === temporal` и `USE_TEMPORAL=true` дополнительно вызывается `describe()` Temporal (если сервер доступен).
+
+**Response:**
+```json
+{
+  "success": true,
+  "unifiedStatus": {
+    "executionId": "exec-uuid",
+    "runtimeKind": "temporal",
+    "lifecycleStatus": "running",
+    "currentNodeId": "temporal-pending",
+    "source": "database",
+    "temporal": { "workflowId": "exec-uuid", "runId": "...", "statusName": "RUNNING", ... },
+    "inMemory": { "completed": false, "failed": false, "temporalAsync": true, ... }
+  }
+}
+```
+
 ### GET /api/executions/:executionId
 Получить выполнение по executionId.
 

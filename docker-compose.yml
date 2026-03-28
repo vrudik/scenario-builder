@@ -34,3 +34,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Приложение (профиль app): docker compose --profile app up -d scenario-builder
+  scenario-builder:
+    profiles: ["app"]
+    build: .
+    container_name: scenario-builder-app
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: file:/app/data/dev.db
+      ENABLE_EVENT_BUS: "false"
+      PORT: "3000"
+    volumes:
+      - scenario_builder_data:/app/data
+
+volumes:
+  scenario_builder_data:

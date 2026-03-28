@@ -1,0 +1,12 @@
+node_modules
+.git
+.cursor
+dist
+coverage
+.env
+.env.*
+*.log
+temp-*.json
+dev.db
+**/agent-transcripts
+.vscode

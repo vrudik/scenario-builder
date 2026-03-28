@@ -10,10 +10,12 @@ export interface CreateQueueInput {
   priority?: number;
   maxConcurrency?: number;
   retryConfig?: Record<string, unknown>;
+  tenantId?: string;
 }
 
 export interface CreateTriggerInput {
   queueId: string;
+  scenarioId?: string;
   eventType: string;
   topic: string;
   filter?: Record<string, unknown>;
@@ -32,6 +34,10 @@ export interface CreateJobInput {
 export class QueueRepository {
   constructor(private prisma: PrismaClient) {}
 
+  private tenant(tid?: string) {
+    return tid && tid.trim() !== '' ? tid : 'default';
+  }
+
   // Queue operations
   async create(data: CreateQueueInput): Promise<ScenarioQueue> {
     return this.prisma.scenarioQueue.create({
@@ -41,13 +47,15 @@ export class QueueRepository {
         priority: data.priority || 0,
         maxConcurrency: data.maxConcurrency || 10,
         retryConfig: data.retryConfig ? JSON.stringify(data.retryConfig) : null,
+        tenantId: this.tenant(data.tenantId)
       },
     });
   }
 
-  async findById(id: string): Promise<ScenarioQueue | null> {
-    return this.prisma.scenarioQueue.findUnique({
-      where: { id },
+  async findById(id: string, tenantId?: string): Promise<ScenarioQueue | null> {
+    const t = this.tenant(tenantId);
+    return this.prisma.scenarioQueue.findFirst({
+      where: { id, tenantId: t },
       include: {
         triggers: true,
         jobs: {
@@ -62,9 +70,14 @@ export class QueueRepository {
     status?: string;
     limit?: number;
     offset?: number;
+    tenantId?: string;
   }): Promise<ScenarioQueue[]> {
+    const t = this.tenant(options?.tenantId);
     return this.prisma.scenarioQueue.findMany({
-      where: options?.status ? { status: options.status } : undefined,
+      where: {
+        tenantId: t,
+        ...(options?.status ? { status: options.status } : {}),
+      },
       take: options?.limit,
       skip: options?.offset,
       orderBy: [
@@ -88,7 +101,16 @@ export class QueueRepository {
     });
   }
 
-  async update(id: string, data: Partial<CreateQueueInput & { status?: string }>): Promise<ScenarioQueue> {
+  async update(
+    id: string,
+    tenantId: string | undefined,
+    data: Partial<CreateQueueInput & { status?: string }>
+  ): Promise<ScenarioQueue> {
+    const t = this.tenant(tenantId);
+    const existing = await this.prisma.scenarioQueue.findFirst({ where: { id, tenantId: t } });
+    if (!existing) {
+      throw new Error('Queue not found');
+    }
     return this.prisma.scenarioQueue.update({
       where: { id },
       data: {
@@ -102,17 +124,30 @@ export class QueueRepository {
     });
   }
 
-  async delete(id: string): Promise<void> {
+  async delete(id: string, tenantId?: string): Promise<void> {
+    const t = this.tenant(tenantId);
+    const existing = await this.prisma.scenarioQueue.findFirst({ where: { id, tenantId: t } });
+    if (!existing) {
+      throw new Error('Queue not found');
+    }
     await this.prisma.scenarioQueue.delete({
       where: { id },
     });
   }
 
   // Trigger operations
-  async createTrigger(data: CreateTriggerInput): Promise<QueueTrigger> {
+  async createTrigger(data: CreateTriggerInput, tenantId?: string): Promise<QueueTrigger> {
+    const t = this.tenant(tenantId);
+    const q = await this.prisma.scenarioQueue.findFirst({
+      where: { id: data.queueId, tenantId: t },
+    });
+    if (!q) {
+      throw new Error('Queue not found');
+    }
     return this.prisma.queueTrigger.create({
       data: {
         queueId: data.queueId,
+        scenarioId: data.scenarioId,
         eventType: data.eventType,
         topic: data.topic,
         filter: data.filter ? JSON.stringify(data.filter) : null,
@@ -127,11 +162,13 @@ export class QueueRepository {
     });
   }
 
-  async findTriggersByEventType(eventType: string): Promise<QueueTrigger[]> {
+  async findTriggersByEventType(eventType: string, tenantId?: string): Promise<QueueTrigger[]> {
+    const t = this.tenant(tenantId);
     return this.prisma.queueTrigger.findMany({
       where: {
         eventType,
         enabled: true,
+        queue: { tenantId: t },
       },
       include: {
         queue: true,
@@ -139,7 +176,19 @@ export class QueueRepository {
     });
   }
 
-  async updateTrigger(id: string, data: Partial<CreateTriggerInput & { enabled?: boolean }>): Promise<QueueTrigger> {
+  async updateTrigger(
+    id: string,
+    tenantId: string | undefined,
+    data: Partial<CreateTriggerInput & { enabled?: boolean }>
+  ): Promise<QueueTrigger> {
+    const t = this.tenant(tenantId);
+    const tr = await this.prisma.queueTrigger.findFirst({
+      where: { id },
+      include: { queue: true },
+    });
+    if (!tr || tr.queue.tenantId !== t) {
+      throw new Error('Trigger not found');
+    }
     return this.prisma.queueTrigger.update({
       where: { id },
       data: {
@@ -151,14 +200,35 @@ export class QueueRepository {
     });
   }
 
-  async deleteTrigger(id: string): Promise<void> {
+  async deleteTrigger(id: string, tenantId?: string): Promise<void> {
+    const t = this.tenant(tenantId);
+    const tr = await this.prisma.queueTrigger.findFirst({
+      where: { id },
+      include: { queue: true },
+    });
+    if (!tr || tr.queue.tenantId !== t) {
+      throw new Error('Trigger not found');
+    }
     await this.prisma.queueTrigger.delete({
       where: { id },
     });
   }
 
   // Job operations
-  async createJob(data: CreateJobInput): Promise<ScenarioJob> {
+  async createJob(data: CreateJobInput, tenantId?: string): Promise<ScenarioJob> {
+    const t = this.tenant(tenantId);
+    const q = await this.prisma.scenarioQueue.findFirst({
+      where: { id: data.queueId, tenantId: t },
+    });
+    if (!q) {
+      throw new Error('Queue not found');
+    }
+    const scenario = await this.prisma.scenario.findFirst({
+      where: { id: data.scenarioId, tenantId: t },
+    });
+    if (!scenario) {
+      throw new Error('Scenario not found');
+    }
     return this.prisma.scenarioJob.create({
       data: {
         queueId: data.queueId,
@@ -173,21 +243,35 @@ export class QueueRepository {
     });
   }
 
-  async findJobById(id: string): Promise<ScenarioJob | null> {
-    return this.prisma.scenarioJob.findUnique({
+  async findJobById(id: string, tenantId?: string): Promise<ScenarioJob | null> {
+    const t = this.tenant(tenantId);
+    const job = await this.prisma.scenarioJob.findUnique({
       where: { id },
       include: {
         queue: true,
         scenario: true,
       },
     });
+    if (!job || job.queue.tenantId !== t) {
+      return null;
+    }
+    return job;
   }
 
-  async findJobsByQueue(queueId: string, options?: {
-    status?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<ScenarioJob[]> {
+  async findJobsByQueue(
+    queueId: string,
+    tenantId: string | undefined,
+    options?: {
+      status?: string;
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<ScenarioJob[]> {
+    const t = this.tenant(tenantId);
+    const q = await this.prisma.scenarioQueue.findFirst({ where: { id: queueId, tenantId: t } });
+    if (!q) {
+      return [];
+    }
     return this.prisma.scenarioJob.findMany({
       where: {
         queueId,
@@ -211,7 +295,12 @@ export class QueueRepository {
     });
   }
 
-  async findNextJob(queueId: string): Promise<ScenarioJob | null> {
+  async findNextJob(queueId: string, tenantId?: string): Promise<ScenarioJob | null> {
+    const t = this.tenant(tenantId);
+    const q = await this.prisma.scenarioQueue.findFirst({ where: { id: queueId, tenantId: t } });
+    if (!q) {
+      return null;
+    }
     return this.prisma.scenarioJob.findFirst({
       where: {
         queueId,
@@ -226,16 +315,25 @@ export class QueueRepository {
     });
   }
 
-  async updateJob(id: string, data: {
-    status?: string;
-    executionId?: string;
-    output?: Record<string, unknown>;
-    error?: Record<string, unknown>;
-    retryCount?: number;
-    startedAt?: Date;
-    completedAt?: Date;
-    failedAt?: Date;
-  }): Promise<ScenarioJob> {
+  async updateJob(
+    id: string,
+    tenantId: string | undefined,
+    data: {
+      status?: string;
+      executionId?: string;
+      output?: Record<string, unknown>;
+      error?: Record<string, unknown>;
+      retryCount?: number;
+      startedAt?: Date;
+      completedAt?: Date;
+      failedAt?: Date;
+    }
+  ): Promise<ScenarioJob> {
+    const t = this.tenant(tenantId);
+    const job = await this.findJobById(id, t);
+    if (!job) {
+      throw new Error('Job not found');
+    }
     return this.prisma.scenarioJob.update({
       where: { id },
       data: {
@@ -251,7 +349,7 @@ export class QueueRepository {
     });
   }
 
-  async getQueueStats(queueId: string): Promise<{
+  async getQueueStats(queueId: string, tenantId?: string): Promise<{
     total: number;
     pending: number;
     queued: number;
@@ -259,6 +357,11 @@ export class QueueRepository {
     completed: number;
     failed: number;
   }> {
+    const t = this.tenant(tenantId);
+    const q = await this.prisma.scenarioQueue.findFirst({ where: { id: queueId, tenantId: t } });
+    if (!q) {
+      return { total: 0, pending: 0, queued: 0, running: 0, completed: 0, failed: 0 };
+    }
     const [total, pending, queued, running, completed, failed] = await Promise.all([
       this.prisma.scenarioJob.count({ where: { queueId } }),
       this.prisma.scenarioJob.count({ where: { queueId, status: 'pending' } }),

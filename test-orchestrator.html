@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Тестирование Runtime Orchestrator</title>
+    <title>Orchestrator Test — Scenario Builder</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -213,6 +213,18 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .form-hint {
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-top: 6px;
+            line-height: 1.4;
+        }
+        .form-hint code {
+            font-size: 0.75rem;
+            background: #f3f4f6;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -269,10 +281,61 @@
     </div>
     
     <script>
+        const TENANT_LS = 'scenarioBuilder.tenantId';
+        const TENANT_RE = /^[a-zA-Z0-9._-]{1,64}$/;
+
         const form = document.getElementById('testForm');
         const statusDiv = document.getElementById('status');
         const resultDiv = document.getElementById('executionResult');
         const submitBtn = document.getElementById('submitBtn');
+
+        function initOrchestratorTenantField() {
+            const input = document.getElementById('orchestratorTenant');
+            if (!input) return;
+            try {
+                const q = new URLSearchParams(window.location.search).get('tenant');
+                if (q !== null) {
+                    const t = q.trim();
+                    if (t === '' || t === 'default') {
+                        localStorage.removeItem(TENANT_LS);
+                        input.value = '';
+                    } else if (TENANT_RE.test(t)) {
+                        localStorage.setItem(TENANT_LS, t);
+                        input.value = t;
+                    } else {
+                        input.value = t;
+                    }
+                    return;
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                const ls = localStorage.getItem(TENANT_LS);
+                if (ls && TENANT_RE.test(String(ls).trim())) {
+                    input.value = String(ls).trim();
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        /** Сохраняет в localStorage и возвращает заголовок; null = невалидный ввод. */
+        function resolveOrchestratorTenant() {
+            const input = document.getElementById('orchestratorTenant');
+            const raw = (input && input.value.trim()) || '';
+            if (raw === '' || raw === 'default') {
+                try {
+                    localStorage.removeItem(TENANT_LS);
+                } catch (e) { /* ignore */ }
+                return 'default';
+            }
+            if (!TENANT_RE.test(raw)) {
+                return null;
+            }
+            try {
+                localStorage.setItem(TENANT_LS, raw);
+            } catch (e) { /* ignore */ }
+            return raw;
+        }
+
+        initOrchestratorTenantField();
         
         function showStatus(message, type) {
             statusDiv.textContent = message;
@@ -299,6 +362,14 @@
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<span class="spinner"></span>Выполняется...';
             
+            const tenantHdr = resolveOrchestratorTenant();
+            if (tenantHdr === null) {
+                showStatus('Неверный Tenant: допустимы 1–64 символа [a-zA-Z0-9._-] или пусто для default', 'error');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '🚀 Запустить Workflow';
+                return;
+            }
+
             const formData = {
                 scenarioId: document.getElementById('scenarioId').value,
                 userIntent: document.getElementById('userIntent').value,
@@ -312,7 +383,8 @@
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'X-Tenant-ID': tenantHdr
                     },
                     body: JSON.stringify(formData)
                 });

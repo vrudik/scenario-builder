@@ -72,6 +72,8 @@ export interface RegisteredTool extends Omit<Tool, 'rateLimit'> {
     provider: string;
     documentation?: string;
   };
+  /** Оценочная стоимость одного успешного вызова (USD), для OPA / executionSpendUsd */
+  estimatedCostUsdPerCall?: number;
 }
 
 /**

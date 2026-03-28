@@ -29,12 +29,13 @@ async function main() {
       throw new Error('Request file not provided');
     }
     const requestData = JSON.parse(fs.readFileSync(requestFile, 'utf-8'));
-    const { userIntent, scenarioId } = requestData;
+    const { userIntent, scenarioId, tenantId, _tenantId } = requestData;
     if (!userIntent) {
       throw new Error('userIntent is required');
     }
-    // Выполняем запрос
-    const result = await executeAgentRequest(userIntent, scenarioId);
+    const result = await executeAgentRequest(userIntent, scenarioId, {
+      tenantId: _tenantId ?? tenantId
+    });
     // Выводим результат в stdout для чтения server.cjs
     // Используем process.stdout напрямую, чтобы избежать проблем с console.log
     process.stdout.write(JSON.stringify(result) + '\n');

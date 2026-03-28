@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Templates Library - Admin Dashboard</title>
+    <title>Templates — Scenario Builder</title>
     <link rel="stylesheet" href="/admin-styles.css">
     <style>
         .templates-header {
@@ -241,6 +241,10 @@
                     <span>📋</span>
                     <span>Scenarios</span>
                 </a>
+                <a href="/admin-spec-studio.html" class="nav-link">
+                    <span>✏️</span>
+                    <span>Конструктор</span>
+                </a>
                 <a href="/admin-queues.html" class="nav-link">
                     <span>🔄</span>
                     <span>Queues</span>
@@ -248,6 +252,10 @@
                 <a href="/admin-monitoring.html" class="nav-link">
                     <span>📈</span>
                     <span>Monitoring</span>
+                </a>
+                <a href="/admin-runs.html" class="nav-link">
+                    <span>🎯</span>
+                    <span>Выполнения</span>
                 </a>
                 <a href="/admin-config.html" class="nav-link">
                     <span>⚙️</span>
@@ -312,13 +320,14 @@
         </div>
     </div>
 
+    <script src="/admin-common.js"></script>
     <script>
         let allTemplates = [];
 
         // Загрузка шаблонов
         async function loadTemplates() {
             try {
-                const response = await fetch('/api/templates');
+                const response = await fetch('/api/templates', withTenantHeaders());
                 const result = await response.json();
                 
                 if (result.success) {
@@ -544,7 +553,7 @@
         // Применение шаблона
         async function doApplyTemplate(templateId, parameters, overrides = {}) {
             try {
-                const response = await fetch(`/api/templates/${templateId}/apply`, {
+                const response = await fetch(`/api/templates/${templateId}/apply`, withTenantHeaders({
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -553,19 +562,19 @@
                         parameters,
                         overrides
                     })
-                });
+                }));
                 
                 const result = await response.json();
                 
                 if (result.success) {
                     // Сохраняем сценарий
-                    const scenarioResponse = await fetch('/api/scenarios', {
+                    const scenarioResponse = await fetch('/api/scenarios', withTenantHeaders({
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify(result.data)
-                    });
+                    }));
                     
                     const scenarioResult = await scenarioResponse.json();
                     
@@ -610,5 +619,6 @@
             loadTemplates();
         });
     </script>
+<script src="/admin-common-rbac.js"></script>
 </body>
 </html>

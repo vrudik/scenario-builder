@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Monitoring - Admin Dashboard</title>
+    <title>Monitoring — Scenario Builder</title>
     <link rel="stylesheet" href="/admin-styles.css">
     <style>
         .metrics-grid {
@@ -51,6 +51,12 @@
         .log-entry.warn { color: #fcd34d; }
         .log-entry.info { color: #93c5fd; }
         .log-entry.success { color: #86efac; }
+        .canary-panel .hint-list { margin: 0 0 14px 1rem; line-height: 1.5; color: var(--text-secondary); font-size: 0.9rem; }
+        .canary-panel .mini-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; margin-top: 10px; }
+        .canary-panel .mini-table th, .canary-panel .mini-table td {
+            text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+        }
+        .canary-panel .mini-table code { font-size: 0.75rem; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -77,9 +83,17 @@
                     <span>📈</span>
                     <span>Monitoring</span>
                 </a>
+                <a href="/admin-runs.html" class="nav-link">
+                    <span>🎯</span>
+                    <span>Выполнения</span>
+                </a>
                 <a href="/admin-scenarios.html" class="nav-link">
                     <span>📋</span>
                     <span>Scenarios</span>
+                </a>
+                <a href="/admin-spec-studio.html" class="nav-link">
+                    <span>✏️</span>
+                    <span>Конструктор</span>
                 </a>
                 <a href="/admin-queues.html" class="nav-link">
                     <span>🔄</span>
@@ -117,6 +131,46 @@
                 <span>📡</span>
                 <span>Event Bus Monitor</span>
             </a>
+            <a href="/admin-spec-studio.html" class="action-btn secondary">
+                <span>🚦</span>
+                <span>Конструктор spec (lane / tools)</span>
+            </a>
+            <a href="/admin-runs.html" class="action-btn secondary">
+                <span>🎯</span>
+                <span>Трекер выполнений</span>
+            </a>
+        </div>
+
+        <!-- Canary & deployment -->
+        <div class="section-card canary-panel">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">🚦</span>
+                    Canary, deployment lane и OPA
+                </h2>
+            </div>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; margin-bottom: 10px;">
+                Полоса трафика (<strong>stable</strong> / <strong>canary</strong>) выбирается из deployment descriptor и попадает в контекст инструментов, события и (при необходимости) вход OPA.
+                Shadow-стратегия дублирует часть запусков на canary без влияния на основной ответ.
+            </p>
+            <ul class="hint-list">
+                <li>Настройка allow/block списков по полосе: <a href="/admin-spec-studio.html">Конструктор</a> — поля <code>canaryAllowedTools</code>, <code>canaryBlockedToolIds</code>, <code>stableBlockedToolIds</code>.</li>
+                <li>Наблюдение за run и <code>deploymentLane</code> в данных: <a href="/admin-runs.html">Выполнения</a> (tenant — в шапке админки; опционально live по WebSocket <code>/ws/admin-runs</code>).</li>
+                <li>Выкат образа и секреты (не только GHCR): в репозитории <code>docs/guides/DEPLOY_CI_GITHUB.md</code>, workflow Deploy staging.</li>
+                <li>Подробнее про Temporal vs in-memory: файл <code>docs/guides/TEMPORAL_VS_IN_MEMORY.md</code> в репозитории.</li>
+            </ul>
+            <div class="section-header" style="margin-top: 8px;">
+                <h3 class="section-title" style="font-size: 1rem;">Счётчики gateway (из <code>/metrics</code>)</h3>
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 6px;">
+                <code>gateway_opa_decisions_total</code>, <code>gateway_policy_denials_total</code> — если приложение экспортирует OTel Prometheus на <code>localhost:9464</code>, прокси в <code>server.cjs</code> подмешивает их в общий ответ. Иначе таблица может быть пустой.
+            </p>
+            <table class="mini-table">
+                <thead><tr><th>metric</th><th>labels</th><th>value</th></tr></thead>
+                <tbody id="gatewayMetricsBody">
+                    <tr><td colspan="3">Загрузка…</td></tr>
+                </tbody>
+            </table>
         </div>
 
         <!-- Metrics Overview -->
@@ -180,10 +234,51 @@
 
     <script src="/admin-common.js"></script>
     <script>
+        function escapeHtml(s) {
+            if (s == null) return '';
+            const div = document.createElement('div');
+            div.textContent = String(s);
+            return div.innerHTML;
+        }
+
+        /** Разбор строк Prometheus (с лейблами и без). */
+        function parsePrometheusLines(text) {
+            const rows = [];
+            for (const line of text.split('\n')) {
+                const t = line.trim();
+                if (!t || t.startsWith('#')) continue;
+                const withLabels = t.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)\{([^}]*)\}\s+(.+)$/);
+                if (withLabels) {
+                    rows.push({ name: withLabels[1], labels: withLabels[2], value: withLabels[3].trim() });
+                    continue;
+                }
+                const plain = t.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)\s+(.+)$/);
+                if (plain) {
+                    rows.push({ name: plain[1], labels: '', value: plain[2].trim() });
+                }
+            }
+            return rows;
+        }
+
+        function renderGatewayMetrics(text) {
+            const body = document.getElementById('gatewayMetricsBody');
+            if (!body) return;
+            const rows = parsePrometheusLines(text).filter((r) => r.name.startsWith('gateway_'));
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="3">Нет серий <code>gateway_*</code> в ответе. Запустите приложение с OTel Prometheus или проверьте агрегатор метрик.</td></tr>';
+                return;
+            }
+            rows.sort((a, b) => (a.name + a.labels).localeCompare(b.name + b.labels));
+            body.innerHTML = rows.map((r) =>
+                '<tr><td>' + escapeHtml(r.name) + '</td><td><code>' + escapeHtml(r.labels || '—') + '</code></td><td>' + escapeHtml(r.value) + '</td></tr>'
+            ).join('');
+        }
+
         async function loadMetrics() {
             try {
                 const response = await fetch('/api/metrics');
                 const text = await response.text();
+                renderGatewayMetrics(text);
                 const metrics = parsePrometheusMetrics(text);
 
                 if (metrics.scenario_executions_total) {
@@ -202,6 +297,10 @@
                 }
             } catch (error) {
                 console.error('Error loading metrics:', error);
+                const body = document.getElementById('gatewayMetricsBody');
+                if (body) {
+                    body.innerHTML = '<tr><td colspan="3">Ошибка загрузки <code>/api/metrics</code></td></tr>';
+                }
             }
         }
 
@@ -209,9 +308,12 @@
             const metrics = {};
             const lines = text.split('\n').filter(line => line.trim() && !line.startsWith('#'));
             lines.forEach(line => {
-                const match = line.match(/^(\w+)\s+([\d.]+)/);
+                const unlabeled = line.replace(/\{[^}]*\}\s+/, ' ');
+                const match = unlabeled.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)\s+([\d.eE+-]+)/);
                 if (match) {
-                    metrics[match[1]] = parseFloat(match[2]);
+                    const k = match[1];
+                    const v = parseFloat(match[2]);
+                    metrics[k] = (metrics[k] || 0) + v;
                 }
             });
             return metrics;
@@ -252,5 +354,6 @@
             }, 10000); // Каждые 10 секунд
         });
     </script>
+<script src="/admin-common-rbac.js"></script>
 </body>
 </html>

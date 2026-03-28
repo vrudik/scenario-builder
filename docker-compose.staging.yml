@@ -1,0 +1,54 @@
+# Staging: изолированное приложение (отдельный порт, БД, сеть).
+# Запуск: см. docs/guides/STAGING.md
+#
+# Пример:
+#   docker compose --env-file .env.staging -f docker-compose.staging.yml up -d --build
+# Файл .env.staging необязателен — подставьте переменные или используйте значения по умолчанию.
+
+version: '3.8'
+
+services:
+  scenario-builder-staging:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scenario-builder:staging-local
+    container_name: scenario-builder-staging
+    ports:
+      - "${STAGING_PORT:-3080}:3000"
+    environment:
+      NODE_ENV: production
+      SCENARIO_BUILDER_ENV: staging
+      PORT: "3000"
+      DATABASE_URL: ${STAGING_DATABASE_URL:-file:/app/data/staging.db}
+      ENABLE_EVENT_BUS: ${STAGING_ENABLE_EVENT_BUS:-false}
+      KAFKA_BROKERS: ${STAGING_KAFKA_BROKERS:-}
+      OPA_URL: ${STAGING_OPA_URL:-}
+      OPA_FAIL_OPEN: ${STAGING_OPA_FAIL_OPEN:-true}
+      USE_TEMPORAL: ${STAGING_USE_TEMPORAL:-false}
+      TEMPORAL_ADDRESS: ${STAGING_TEMPORAL_ADDRESS:-}
+    volumes:
+      - staging_app_data:/app/data
+    restart: unless-stopped
+    networks:
+      - staging_net
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3000/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 50s
+
+networks:
+  staging_net:
+    name: scenario-builder-staging-net
+
+volumes:
+  staging_app_data:
+    name: scenario_builder_staging_data

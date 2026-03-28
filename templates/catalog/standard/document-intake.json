@@ -1,0 +1,61 @@
+{
+  "version": "0.1.0",
+  "id": "tpl-document-intake",
+  "name": "Document Intake & Processing",
+  "description": "Parse, extract, validate, and store document data with PII-aware policies",
+  "goal": "Process incoming documents end-to-end with compliance guardrails",
+  "category": "standard",
+  "difficulty": "medium",
+  "tags": ["document", "compliance", "processing"],
+  "kpi": [
+    { "name": "extraction_accuracy", "target": 0.92, "unit": "percentage" },
+    { "name": "processing_time", "target": 15000, "unit": "milliseconds" }
+  ],
+  "triggers": [
+    { "type": "event", "source": "documents.intake", "config": { "eventType": "document_received" } }
+  ],
+  "allowedActions": [
+    {
+      "id": "parse-document",
+      "name": "Parse Document",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "extract-fields",
+      "name": "Extract Structured Fields",
+      "version": "1.0.0",
+      "riskClass": "moderate",
+      "requiresApproval": false
+    },
+    {
+      "id": "validate-data",
+      "name": "Validate Extracted Data",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "store-record",
+      "name": "Store Processed Record",
+      "version": "1.0.0",
+      "riskClass": "moderate",
+      "requiresApproval": false
+    }
+  ],
+  "riskClass": "moderate",
+  "nonFunctional": {
+    "sla": { "availability": 0.99, "latency": { "p95": 15000 } },
+    "cost": { "maxPerExecution": 0.20 },
+    "tokenBudget": { "maxPerExecution": 5000 }
+  },
+  "observability": {
+    "metrics": ["execution_time", "extraction_accuracy", "validation_pass_rate"],
+    "alerts": [
+      { "name": "low_accuracy", "condition": "extraction_accuracy < 0.85", "severity": "error" },
+      { "name": "slow_processing", "condition": "processing_time > 30000", "severity": "warning" }
+    ]
+  },
+  "owner": "platform-team"
+}

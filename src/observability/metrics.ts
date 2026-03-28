@@ -155,6 +155,16 @@ export const systemMetrics = {
   toolDuration: createHistogram('tool_duration_seconds', 'Duration of tool execution in seconds'),
   toolRateLimitHits: createCounter('tool_rate_limit_hits_total', 'Total number of rate limit hits'),
   toolCircuitBreakerOpens: createCounter('tool_circuit_breaker_opens_total', 'Total number of circuit breaker opens'),
+  /** Отказы до вызова инструмента: layer=local|opa, deployment_lane=stable|canary|unset */
+  gatewayPolicyDenials: createCounter(
+    'gateway_policy_denials_total',
+    'Tool access denied by local ExecutionPolicy or OPA at gateway'
+  ),
+  /** Итог вызова OPA scenario/allow (после локального allow): result=allow|deny */
+  gatewayOpaDecisions: createCounter(
+    'gateway_opa_decisions_total',
+    'OPA allow policy evaluations at tool gateway'
+  ),
 
   // Метрики Runtime Orchestrator
   workflowExecutions: createCounter('workflow_executions_total', 'Total number of workflow executions'),

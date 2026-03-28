@@ -1,12 +1,17 @@
 /**
  * Guardrails для защиты от рисков LLM-приложений
- * 
+ *
  * Защита от:
  * - Prompt injection
  * - Insecure output handling
  * - Excessive agency
  * - И других рисков из OWASP Top 10 for LLM Applications
+ *
+ * Конфигурация включаемых проверок и кастомных паттернов централизованно
+ * хранится в GuardrailsConfig и может меняться через admin UI.
  */
+
+import { getGuardrailsConfig, type GuardrailsConfig } from './guardrails-config';
 
 /**
  * Тип риска
@@ -33,7 +38,7 @@ export interface GuardrailResult {
  * Guardrails Manager
  */
 export class GuardrailsManager {
-  private readonly promptInjectionPatterns: RegExp[] = [
+  private readonly basePromptInjectionPatterns: RegExp[] = [
     /ignore\s+(previous|above|all)\s+(instructions?|rules?)/i,
     /you\s+are\s+(now|a)\s+(different|new)/i,
     /system\s*:\s*you\s+are/i,
@@ -41,12 +46,39 @@ export class GuardrailsManager {
     /<\|im_end\|>/i
   ];
 
+  private get config(): GuardrailsConfig {
+    return getGuardrailsConfig();
+  }
+
   /**
    * Проверка входного промпта на prompt injection
    */
   checkPrompt(prompt: string): GuardrailResult {
+    const { risks, customPatterns, sensitivity } = this.config;
+
+    if (!risks.promptInjection.enabled) {
+      return {
+        allowed: true,
+        confidence: 1.0
+      };
+    }
+
+    const patterns: RegExp[] = [...this.basePromptInjectionPatterns];
+
+    // В режиме высокой чувствительности добавляем кастомные паттерны как RegExp,
+    // в низкой/средней — только базовые.
+    if (sensitivity === 'high' && customPatterns.promptInjection.length > 0) {
+      for (const p of customPatterns.promptInjection) {
+        try {
+          patterns.push(new RegExp(p, 'i'));
+        } catch {
+          // игнорируем некорректные выражения
+        }
+      }
+    }
+
     // Проверка на известные паттерны prompt injection
-    for (const pattern of this.promptInjectionPatterns) {
+    for (const pattern of patterns) {
       if (pattern.test(prompt)) {
         return {
           allowed: false,
@@ -77,6 +109,15 @@ export class GuardrailsManager {
    * Проверка вывода модели на безопасность
    */
   checkOutput(output: string, context?: { toolCalls?: unknown[] }): GuardrailResult {
+    const { risks, customPatterns } = this.config;
+
+    if (!risks.insecureOutput.enabled) {
+      return {
+        allowed: true,
+        confidence: 1.0
+      };
+    }
+
     // Если это ответ модели после выполнения tool call, разрешаем практически все
     // (модель может упоминать слова типа "format" в контексте объяснения)
     if (context?.toolCalls && context.toolCalls.length > 0) {
@@ -104,6 +145,15 @@ export class GuardrailsManager {
       /javascript:\s*[^"'\s]/i,             // javascript: протокол с кодом (не просто упоминание)
       /<[^>]*\son\w+\s*=\s*["'][^"']*["']/i // HTML события в тегах (onclick="...")
     ];
+
+    // Добавляем пользовательские паттерны
+    for (const patternStr of customPatterns.insecureOutput) {
+      try {
+        dangerousCommandPatterns.push(new RegExp(patternStr, 'i'));
+      } catch {
+        // игнорируем некорректные выражения
+      }
+    }
     
     // Проверяем только если это действительно похоже на команду, а не просто упоминание слова
     for (const pattern of dangerousCommandPatterns) {
@@ -139,7 +189,11 @@ export class GuardrailsManager {
     }
 
     // Проверка на excessive agency (слишком много tool calls)
-    if (context?.toolCalls && context.toolCalls.length > 10) {
+    const maxToolCalls = risks.excessiveAgency.enabled
+      ? risks.excessiveAgency.maxToolCallsPerResponse
+      : Infinity;
+
+    if (context?.toolCalls && context.toolCalls.length > maxToolCalls) {
       return {
         allowed: false,
         riskType: RiskType.EXCESSIVE_AGENCY,
@@ -158,14 +212,32 @@ export class GuardrailsManager {
    * Проверка tool call на безопасность
    */
   checkToolCall(toolId: string, inputs: Record<string, unknown>): GuardrailResult {
-    // Проверка на опасные инструменты
-    const dangerousTools = ['system', 'exec', 'eval', 'shell'];
-    if (dangerousTools.some(dt => toolId.toLowerCase().includes(dt))) {
+    const { risks, customPatterns } = this.config;
+
+    if (!risks.unauthorizedCode.enabled && !risks.insecureOutput.enabled) {
       return {
-        allowed: false,
-        riskType: RiskType.UNAUTHORIZED_CODE,
-        reason: `Dangerous tool detected: ${toolId}`,
-        confidence: 0.9
+        allowed: true,
+        confidence: 1.0
+      };
+    }
+
+    // Проверка на опасные инструменты
+    if (risks.unauthorizedCode.enabled) {
+      const dangerousTools = ['system', 'exec', 'eval', 'shell'];
+      if (dangerousTools.some(dt => toolId.toLowerCase().includes(dt))) {
+        return {
+          allowed: false,
+          riskType: RiskType.UNAUTHORIZED_CODE,
+          reason: `Dangerous tool detected: ${toolId}`,
+          confidence: 0.9
+        };
+      }
+    }
+
+    if (!risks.insecureOutput.enabled) {
+      return {
+        allowed: true,
+        confidence: 1.0
       };
     }
 
@@ -183,6 +255,14 @@ export class GuardrailsManager {
       /\bshutdown\s+-/i,         // shutdown команда
       /\breboot\s+-/i            // reboot команда
     ];
+
+    for (const patternStr of customPatterns.toolInputDangerous) {
+      try {
+        dangerousPatterns.push(new RegExp(patternStr, 'i'));
+      } catch {
+        // игнорируем некорректные выражения
+      }
+    }
     
     for (const pattern of dangerousPatterns) {
       if (pattern.test(inputsStr)) {

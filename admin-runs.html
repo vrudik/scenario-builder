@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Выполнения — Scenario Builder</title>
+    <link rel="stylesheet" href="/admin-styles.css">
+    <style>
+        .run-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: flex-end;
+            margin-bottom: 20px;
+        }
+        .run-toolbar .config-item { margin-bottom: 0; flex: 1; min-width: 220px; }
+        .json-panel {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 10px;
+            padding: 16px;
+            font-family: ui-monospace, 'Cascadia Code', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            overflow: auto;
+            max-height: 420px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .json-panel.empty { color: #64748b; font-style: italic; }
+        .pill {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .pill.ok { background: #dcfce7; color: #166534; }
+        .pill.run { background: #dbeafe; color: #1e40af; }
+        .pill.fail { background: #fee2e2; color: #991b1b; }
+        .hint { font-size: 0.875rem; color: var(--text-secondary); margin-top: 8px; }
+        .section-card + .section-card { margin-top: 16px; }
+        .hint-box {
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-top: 12px;
+            font-size: 0.875rem;
+            line-height: 1.45;
+            display: none;
+        }
+        .hint-box.visible { display: block; }
+        .hint-box.info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a5f; }
+        .hint-box.warn { background: #fffbeb; border: 1px solid #fcd34d; color: #78350f; }
+        .hint-box.err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+        .recent-wrap { margin-top: 14px; }
+        .recent-label { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 6px; }
+        .recent-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .chip-btn {
+            font-size: 0.8rem;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: var(--card-bg, #fff);
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .chip-btn:hover { filter: brightness(0.97); }
+        .db-recent-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+            margin-top: 10px;
+        }
+        .db-recent-table th, .db-recent-table td {
+            text-align: left;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .db-recent-table tbody tr { cursor: pointer; }
+        .db-recent-table tbody tr:hover { background: #f1f5f9; }
+        .db-recent-empty { font-size: 0.875rem; color: var(--text-secondary); margin-top: 8px; }
+        .live-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 12px;
+        }
+        @media (max-width: 900px) { .live-grid { grid-template-columns: 1fr; } }
+        .node-steps-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+        }
+        .node-steps-table th, .node-steps-table td {
+            text-align: left;
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border);
+        }
+        .evt-timeline { list-style: none; margin: 0; padding: 0; border-left: 3px solid #cbd5e1; margin-left: 8px; }
+        .evt-timeline li {
+            position: relative;
+            padding: 6px 0 6px 16px;
+            font-size: 0.8125rem;
+            line-height: 1.4;
+        }
+        .evt-timeline li::before {
+            content: '';
+            position: absolute;
+            left: -7px;
+            top: 10px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #64748b;
+        }
+        .evt-timeline li.evt-ok::before { background: #16a34a; }
+        .evt-timeline li.evt-fail::before { background: #dc2626; }
+        .evt-timeline li.evt-run::before { background: #2563eb; }
+        .evt-meta { color: var(--text-secondary); font-size: 0.75rem; }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <span>⚙️</span>
+                <span>Scenario Builder Admin</span>
+            </div>
+            <div class="nav-links">
+                <a href="/admin-dashboard.html" class="nav-link"><span>📊</span><span>Overview</span></a>
+                <a href="/admin-components.html" class="nav-link"><span>🧩</span><span>Components</span></a>
+                <a href="/admin-testing.html" class="nav-link"><span>🧪</span><span>Testing</span></a>
+                <a href="/admin-monitoring.html" class="nav-link"><span>📈</span><span>Monitoring</span></a>
+                <a href="/admin-runs.html" class="nav-link active"><span>🎯</span><span>Выполнения</span></a>
+                <a href="/admin-scenarios.html" class="nav-link"><span>📋</span><span>Scenarios</span></a>
+                <a href="/admin-spec-studio.html" class="nav-link"><span>✏️</span><span>Конструктор</span></a>
+                <a href="/admin-queues.html" class="nav-link"><span>🔄</span><span>Queues</span></a>
+                <a href="/admin-templates.html" class="nav-link"><span>📚</span><span>Templates</span></a>
+                <a href="/admin-config.html" class="nav-link"><span>⚙️</span><span>Configuration</span></a>
+            </div>
+            <div class="nav-status">
+                <span class="status-indicator"></span>
+                <span id="systemStatus">System Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <div class="page-header">
+            <h1 class="page-title">Выполнения и статус</h1>
+            <p class="page-subtitle">
+                Просмотр снимка из БД и единого статуса (в т.ч. после рестарта сервера).
+                Нужен <code>node server.cjs</code> с БД и миграциями.
+            </p>
+        </div>
+
+        <div class="section-card">
+            <div class="run-toolbar">
+                <div class="config-item">
+                    <label class="config-label" for="execId">Execution ID</label>
+                    <input type="text" class="config-input" id="execId" placeholder="например exec-1730000000">
+                </div>
+                <label class="config-item" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="autoRefresh">
+                    <span>Авто-обновление единого статуса (5 с; для running — 2 с)</span>
+                </label>
+                <label class="config-item" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="useWsStream">
+                    <span>Live через WebSocket (одно соединение; вместо HTTP-таймеров при авто)</span>
+                </label>
+                <label class="config-item" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="autoLivePanels" checked>
+                    <span>Вместе с статусом обновлять узлы и события из БД</span>
+                </label>
+                <label class="config-item" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="liveFastPoll" checked>
+                    <span>При running/pending — доп. опрос узлов/событий каждые 1,5 с</span>
+                </label>
+            </div>
+            <div class="action-grid" style="margin-top:0;">
+                <button type="button" class="action-btn" id="btnUnified">Единый статус</button>
+                <button type="button" class="action-btn secondary" id="btnFull">Полный снимок (БД)</button>
+                <button type="button" class="action-btn secondary" id="btnEvents">События</button>
+            </div>
+            <p class="hint">
+                Из демо: после One-click run откройте ссылку «Открыть в трекере» на <a href="/demo-e2e.html">demo-e2e</a>
+                (ID попадёт в «Недавние»). Сценарии: <a href="/admin-scenarios.html">список → Executions</a>.
+                Spec по форме: <a href="/admin-spec-studio.html">Конструктор</a>.
+                Тенант API: поле <strong>Tenant</strong> в шапке (или <code>?tenant=</code> в URL) — тот же <code>X-Tenant-ID</code>, что и для сценариев.
+            </p>
+            <div id="runsHint" class="hint-box" role="status" aria-live="polite"></div>
+            <div class="recent-wrap">
+                <div class="recent-label">Недавние execution (localStorage, этот браузер)</div>
+                <div class="recent-chips" id="recentChips"></div>
+                <button type="button" class="action-btn secondary btn-small" id="btnClearRecent" style="margin-top:8px;">Очистить список</button>
+            </div>
+            <div class="recent-wrap" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);">
+                <div class="recent-label">Последние выполнения из БД (<code>GET /api/executions</code>)</div>
+                <div class="run-toolbar" style="margin-bottom:0;">
+                    <div class="config-item" style="min-width:100px;max-width:140px;">
+                        <label class="config-label" for="dbRecentLimit">limit</label>
+                        <input type="number" class="config-input" id="dbRecentLimit" value="40" min="1" max="100">
+                    </div>
+                    <div class="config-item" style="flex:1;min-width:200px;">
+                        <label class="config-label" for="dbRecentScenario">scenarioId (опц., FK в БД)</label>
+                        <input type="text" class="config-input" id="dbRecentScenario" placeholder="uuid сценария из admin-scenarios">
+                    </div>
+                    <button type="button" class="action-btn secondary" id="btnDbRecent">Загрузить из БД</button>
+                </div>
+                <label class="config-item" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px;">
+                    <input type="checkbox" id="autoDbRecent">
+                    <span>Авто-обновление таблицы (10 с, если уже была загрузка)</span>
+                </label>
+                <p id="dbRecentHint" class="hint" style="margin-top:8px;"></p>
+                <div id="dbRecentTableHost"></div>
+            </div>
+            <div id="lifecycleBar" style="margin-top:16px;"></div>
+        </div>
+
+        <div class="section-card" id="liveExecutionSection">
+            <div class="section-header">
+                <h2 class="section-title"><span class="section-icon">🔁</span> Ход выполнения (live)</h2>
+            </div>
+            <p class="hint" style="margin-top:0;">
+                Узлы пишутся в <code>NodeExecution</code> при запуске с БД. События — из <code>ExecutionEvent</code>: оркестратор сохраняет <code>trigger</code>, <code>node_completed</code>, <code>node_failed</code>, <code>compensation</code> при наличии репозитория БД.
+                Обновляется вместе с «Единый статус» (авто 2 с / 5 с) и при включённом «доп. опрос 1,5 с» — чаще только панели live без повторного тяжёлого unified-status. При включённом <strong>WebSocket</strong> сервер шлёт снимки по каналу <code>/ws/admin-runs</code> (интервалы как у авто / 1,5 с при fast).
+            </p>
+            <div class="live-grid">
+                <div>
+                    <div class="recent-label">Узлы workflow</div>
+                    <div id="nodeStepsHost"><p class="db-recent-empty">Запросите единый статус по execution ID.</p></div>
+                </div>
+                <div>
+                    <div class="recent-label">События</div>
+                    <div id="eventTimelineHost"><p class="db-recent-empty">—</p></div>
+                </div>
+            </div>
+            <p class="hint" id="livePanelsHint" style="margin-top:10px;"></p>
+        </div>
+
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title"><span class="section-icon">📌</span> Unified status</h2>
+            </div>
+            <div class="json-panel empty" id="outUnified">Нажмите «Единый статус».</div>
+        </div>
+
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title"><span class="section-icon">🗄️</span> Execution record</h2>
+            </div>
+            <div class="json-panel empty" id="outFull">Нажмите «Полный снимок».</div>
+        </div>
+
+        <div class="section-card">
+            <div class="section-header">
+                <h2 class="section-title"><span class="section-icon">📜</span> Events</h2>
+            </div>
+            <div class="json-panel empty" id="outEvents">Нажмите «События».</div>
+        </div>
+    </div>
+
+    <script src="/admin-common.js"></script>
+    <script>
+        const LS_RECENT = 'scenarioBuilder.recentExecutionIds';
+        const RECENT_MAX = 12;
+
+        const execId = document.getElementById('execId');
+        const outUnified = document.getElementById('outUnified');
+        const outFull = document.getElementById('outFull');
+        const outEvents = document.getElementById('outEvents');
+        const lifecycleBar = document.getElementById('lifecycleBar');
+        const runsHint = document.getElementById('runsHint');
+        const recentChips = document.getElementById('recentChips');
+        const dbRecentLimit = document.getElementById('dbRecentLimit');
+        const dbRecentScenario = document.getElementById('dbRecentScenario');
+        const dbRecentHint = document.getElementById('dbRecentHint');
+        const dbRecentTableHost = document.getElementById('dbRecentTableHost');
+        const autoDbRecent = document.getElementById('autoDbRecent');
+        const autoLivePanels = document.getElementById('autoLivePanels');
+        const liveFastPoll = document.getElementById('liveFastPoll');
+        const nodeStepsHost = document.getElementById('nodeStepsHost');
+        const eventTimelineHost = document.getElementById('eventTimelineHost');
+        const livePanelsHint = document.getElementById('livePanelsHint');
+        const useWsStreamEl = document.getElementById('useWsStream');
+        /** @type {WebSocket | null} */
+        let adminRunsWs = null;
+        let refreshTimeout = null;
+        let dbRefreshTimer = null;
+        let livePanelsFastTimer = null;
+        /** @type {string} */
+        let lastUnifiedLifecycle = '';
+
+        function getId() {
+            return (execId.value || '').trim();
+        }
+
+        function setPanel(el, text, isEmpty) {
+            el.textContent = text;
+            el.classList.toggle('empty', !!isEmpty);
+        }
+
+        function setRunsHint(message, variant) {
+            if (!runsHint) return;
+            if (!message) {
+                runsHint.className = 'hint-box';
+                runsHint.textContent = '';
+                return;
+            }
+            runsHint.className = 'hint-box visible ' + (variant || 'info');
+            runsHint.textContent = message;
+        }
+
+        function readRecentList() {
+            try {
+                const list = JSON.parse(localStorage.getItem(LS_RECENT) || '[]');
+                return Array.isArray(list) ? list : [];
+            } catch {
+                return [];
+            }
+        }
+
+        function recordRecentExecutionId(id) {
+            if (!id) return;
+            let list = readRecentList().filter((x) => x !== id);
+            list.unshift(id);
+            if (list.length > RECENT_MAX) list = list.slice(0, RECENT_MAX);
+            localStorage.setItem(LS_RECENT, JSON.stringify(list));
+            renderRecentChips();
+        }
+
+        function renderRecentChips() {
+            if (!recentChips) return;
+            const list = readRecentList();
+            recentChips.innerHTML = '';
+            if (!list.length) {
+                const span = document.createElement('span');
+                span.className = 'hint';
+                span.style.marginTop = '0';
+                span.textContent = 'Пока пусто — запустите демо или нажмите «Единый статус» после успешного ответа.';
+                recentChips.appendChild(span);
+                return;
+            }
+            list.forEach((id) => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'chip-btn';
+                b.textContent = id.length > 36 ? id.slice(0, 18) + '…' + id.slice(-8) : id;
+                b.title = id;
+                b.addEventListener('click', () => {
+                    execId.value = id;
+                    sendAdminRunsSubscribe();
+                    fetchUnified();
+                });
+                recentChips.appendChild(b);
+            });
+        }
+
+        async function apiGetExecution(id, suffixPath) {
+            const url = '/api/executions/' + encodeURIComponent(id) + suffixPath;
+            try {
+                const res = await fetch(url, withTenantHeaders());
+                const text = await res.text();
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch {
+                    data = { _parseError: true, _rawSnippet: text.slice(0, 200) };
+                }
+                return { ok: res.ok, status: res.status, data, text };
+            } catch (e) {
+                return { ok: false, status: 0, data: null, text: '', networkError: e.message || String(e) };
+            }
+        }
+
+        function friendlyApiHint(ctx) {
+            const { status, data, networkError } = ctx;
+            if (networkError) {
+                return {
+                    variant: 'err',
+                    text: 'Сеть: запрос не дошёл до сервера. Запустите node server.cjs в корне проекта и откройте эту страницу с того же хоста/порта. (' + networkError + ')'
+                };
+            }
+            if (data && data._parseError) {
+                return {
+                    variant: 'warn',
+                    text: 'Ответ не похож на JSON (прокси, HTML-ошибка или неверный путь). Первые символы: ' + (data._rawSnippet || '—')
+                };
+            }
+            const code = data && data.error && data.error.code;
+            const msg = data && data.error && data.error.message;
+            if (status === 404 && code === 'NOT_FOUND') {
+                return {
+                    variant: 'warn',
+                    text: 'Выполнение не найдено в БД. Частый случай: синтетический или демо-ID, если run не писался в ту же PostgreSQL. Возьмите executionId из списка Executions у сценария или после реального запуска с сохранением.'
+                };
+            }
+            if (status === 404) {
+                return { variant: 'warn', text: 'HTTP 404 — ресурс не найден.' };
+            }
+            if (status >= 500) {
+                return { variant: 'err', text: 'HTTP ' + status + ' на сервере. Смотрите консоль server.cjs.' };
+            }
+            if (data && data.success === false) {
+                return {
+                    variant: 'warn',
+                    text: (code ? code + ': ' : '') + (msg || 'См. JSON в панели ниже.')
+                };
+            }
+            return null;
+        }
+
+        function renderLifecycle(u) {
+            if (!u || !u.lifecycleStatus) {
+                lifecycleBar.innerHTML = '';
+                return;
+            }
+            const cls = u.lifecycleStatus === 'completed' ? 'ok'
+                : u.lifecycleStatus === 'failed' || u.lifecycleStatus === 'cancelled' ? 'fail'
+                : 'run';
+            lifecycleBar.innerHTML = `
+                <span class="pill ${cls}">${u.lifecycleStatus}</span>
+                <span class="pill run" style="margin-left:8px;">${u.runtimeKind || '—'}</span>
+                ${u.source ? `<span class="pill run" style="margin-left:8px;">источник: ${u.source}</span>` : ''}
+            `;
+        }
+
+        function lifecycleIsActive() {
+            return lastUnifiedLifecycle === 'running' || lastUnifiedLifecycle === 'pending';
+        }
+
+        function clearAutoUnifiedLoop() {
+            if (refreshTimeout) {
+                clearTimeout(refreshTimeout);
+                refreshTimeout = null;
+            }
+        }
+
+        function clearLivePanelsFastLoop() {
+            if (livePanelsFastTimer) {
+                clearInterval(livePanelsFastTimer);
+                livePanelsFastTimer = null;
+            }
+        }
+
+        /** Частый опрос только GET execution + events, пока run активен */
+        function scheduleLivePanelsFastLoop() {
+            clearLivePanelsFastLoop();
+            if (useWsStreamEl && useWsStreamEl.checked) return;
+            const ar = document.getElementById('autoRefresh');
+            const fast = liveFastPoll && liveFastPoll.checked;
+            if (!ar || !ar.checked || !fast || !autoLivePanels || !autoLivePanels.checked) return;
+            if (!getId() || !lifecycleIsActive()) return;
+            livePanelsFastTimer = setInterval(() => {
+                if (!getId()) {
+                    clearLivePanelsFastLoop();
+                    return;
+                }
+                if (!lifecycleIsActive()) {
+                    clearLivePanelsFastLoop();
+                    return;
+                }
+                refreshLivePanels(true);
+            }, 1500);
+        }
+
+        function useWsStream() {
+            return !!(useWsStreamEl && useWsStreamEl.checked);
+        }
+
+        function closeAdminRunsWebSocket() {
+            if (adminRunsWs) {
+                try {
+                    adminRunsWs.close();
+                } catch (_) {}
+                adminRunsWs = null;
+            }
+        }
+
+        function sendAdminRunsSubscribe() {
+            if (!adminRunsWs || adminRunsWs.readyState !== WebSocket.OPEN) return;
+            adminRunsWs.send(
+                JSON.stringify({
+                    type: 'subscribe',
+                    executionId: getId(),
+                    tenant: getTenantId(),
+                    fastPoll: !!(liveFastPoll && liveFastPoll.checked),
+                    livePanels: !!(autoLivePanels && autoLivePanels.checked)
+                })
+            );
+        }
+
+        function syncAdminRunsWebSocket() {
+            const ar = document.getElementById('autoRefresh');
+            if (!ar || !ar.checked || !useWsStream()) {
+                closeAdminRunsWebSocket();
+                return;
+            }
+            const id = getId();
+            if (!id) {
+                closeAdminRunsWebSocket();
+                setRunsHint('WebSocket: введите execution ID для подписки.', 'warn');
+                return;
+            }
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = proto + '//' + location.host + '/ws/admin-runs';
+            if (adminRunsWs && adminRunsWs.readyState === WebSocket.OPEN) {
+                sendAdminRunsSubscribe();
+                return;
+            }
+            closeAdminRunsWebSocket();
+            try {
+                adminRunsWs = new WebSocket(url);
+            } catch (e) {
+                setRunsHint('WebSocket: ' + (e.message || String(e)), 'err');
+                return;
+            }
+            adminRunsWs.addEventListener('open', () => sendAdminRunsSubscribe());
+            adminRunsWs.addEventListener('message', (ev) => {
+                let msg;
+                try {
+                    msg = JSON.parse(ev.data);
+                } catch {
+                    return;
+                }
+                if (msg.type === 'error') {
+                    setRunsHint('WS: ' + (msg.message || 'ошибка'), 'warn');
+                    return;
+                }
+                if (msg.type !== 'tick') return;
+                void applyWsTick(msg);
+            });
+            adminRunsWs.addEventListener('close', () => {
+                adminRunsWs = null;
+                const ar2 = document.getElementById('autoRefresh');
+                if (ar2 && ar2.checked && useWsStream() && getId()) {
+                    setTimeout(() => syncAdminRunsWebSocket(), 2000);
+                }
+            });
+        }
+
+        async function applyUnifiedUI(r) {
+            const hint = friendlyApiHint(r);
+            if (hint) {
+                setRunsHint(hint.text, hint.variant);
+            } else {
+                setRunsHint('');
+            }
+            if (r.networkError) {
+                setPanel(outUnified, 'Ошибка сети: ' + r.networkError, false);
+                lifecycleBar.innerHTML = '';
+                lastUnifiedLifecycle = '';
+                return false;
+            }
+            if (!r.data || !r.data.success) {
+                setPanel(outUnified, JSON.stringify(r.data, null, 2), false);
+                lifecycleBar.innerHTML = '';
+                lastUnifiedLifecycle = '';
+                return false;
+            }
+            const u = r.data.unifiedStatus;
+            lastUnifiedLifecycle = u && u.lifecycleStatus ? u.lifecycleStatus : '';
+            setPanel(outUnified, JSON.stringify(u, null, 2), false);
+            renderLifecycle(u);
+            recordRecentExecutionId(getId());
+            return true;
+        }
+
+        async function applyWsTick(msg) {
+            const rU = {
+                ok: msg.unified.ok,
+                status: msg.unified.status,
+                data: msg.unified.data
+            };
+            const ok = await applyUnifiedUI(rU);
+            if (!ok) return;
+            if (autoLivePanels && autoLivePanels.checked && msg.execution && msg.events) {
+                const fullR = {
+                    ok: msg.execution.ok,
+                    status: msg.execution.status,
+                    data: msg.execution.data
+                };
+                const evR = {
+                    ok: msg.events.ok,
+                    status: msg.events.status,
+                    data: msg.events.data
+                };
+                if (fullR.ok && fullR.data && fullR.data.success && fullR.data.execution) {
+                    renderNodeSteps(fullR.data.execution);
+                } else {
+                    renderNodeSteps(null);
+                }
+                if (evR.ok && evR.data && evR.data.success && Array.isArray(evR.data.events)) {
+                    renderEventTimeline(evR.data.events);
+                } else {
+                    renderEventTimeline([]);
+                }
+                if (livePanelsHint) {
+                    const bits = [];
+                    bits.push(fullR.ok ? 'снимок execution (WS)' : 'execution: HTTP ' + fullR.status);
+                    bits.push(evR.ok ? 'события (WS)' : 'events: HTTP ' + evR.status);
+                    livePanelsHint.textContent = bits.join(' · ');
+                }
+            } else if (livePanelsHint) {
+                livePanelsHint.textContent = 'WS: панели узлов/событий выключены чекбоксом.';
+            }
+        }
+
+        function scheduleAutoUnifiedLoop() {
+            clearAutoUnifiedLoop();
+            const ar = document.getElementById('autoRefresh');
+            if (!ar || !ar.checked) return;
+            if (useWsStream()) {
+                syncAdminRunsWebSocket();
+                return;
+            }
+            const delay = lifecycleIsActive() ? 2000 : 5000;
+            refreshTimeout = setTimeout(async () => {
+                if (getId()) {
+                    await fetchUnified(true);
+                }
+                scheduleAutoUnifiedLoop();
+            }, delay);
+        }
+
+        function renderNodeSteps(execution) {
+            if (!nodeStepsHost) return;
+            const nodes = (execution && execution.nodeExecutions) || [];
+            if (!nodes.length) {
+                nodeStepsHost.innerHTML = '<p class="db-recent-empty">Нет строк NodeExecution для этого run (старые данные или run без записи узлов в БД).</p>';
+                return;
+            }
+            const rows = nodes.map((n) => {
+                const dur = n.duration != null ? n.duration + ' ms' : '—';
+                const st = (n.state || '').replace(/</g, '');
+                const nid = (n.nodeId || '').replace(/</g, '');
+                return '<tr><td>' + nid + '</td><td>' + st + '</td><td>' + dur + '</td></tr>';
+            }).join('');
+            nodeStepsHost.innerHTML = '<table class="node-steps-table"><thead><tr><th>nodeId</th><th>state</th><th>duration</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        }
+
+        function renderEventTimeline(events) {
+            if (!eventTimelineHost) return;
+            const list = Array.isArray(events) ? events : [];
+            if (!list.length) {
+                eventTimelineHost.innerHTML = '<p class="db-recent-empty">В БД нет ExecutionEvent для этого run (история событий может быть только в ответе оркестратора).</p>';
+                return;
+            }
+            const items = list.map((e) => {
+                const t = (e.type || '').replace(/</g, '');
+                const nid = e.nodeId ? String(e.nodeId).replace(/</g, '') : '';
+                const ts = fmtShort(e.timestamp);
+                let cls = 'evt-run';
+                if (t.indexOf('failed') >= 0 || t === 'compensation') cls = 'evt-fail';
+                else if (t.indexOf('completed') >= 0 || t === 'trigger') cls = 'evt-ok';
+                return '<li class="' + cls + '"><strong>' + t + '</strong>' + (nid ? ' · ' + nid : '') + '<div class="evt-meta">' + ts + '</div></li>';
+            }).join('');
+            eventTimelineHost.innerHTML = '<ul class="evt-timeline">' + items + '</ul>';
+        }
+
+        async function refreshLivePanels(fromAutoPoll) {
+            const id = getId();
+            if (!id || !nodeStepsHost || !eventTimelineHost) return;
+            if (fromAutoPoll && autoLivePanels && !autoLivePanels.checked) {
+                if (livePanelsHint) livePanelsHint.textContent = 'Авто: панели узлов/событий пропущены (чекбокс выкл.).';
+                return;
+            }
+            if (livePanelsHint) livePanelsHint.textContent = 'Загрузка…';
+            const [fullR, evR] = await Promise.all([
+                apiGetExecution(id, ''),
+                apiGetExecution(id, '/events')
+            ]);
+            if (fullR.ok && fullR.data && fullR.data.success && fullR.data.execution) {
+                renderNodeSteps(fullR.data.execution);
+            } else {
+                renderNodeSteps(null);
+            }
+            if (evR.ok && evR.data && evR.data.success && Array.isArray(evR.data.events)) {
+                renderEventTimeline(evR.data.events);
+            } else {
+                renderEventTimeline([]);
+            }
+            if (livePanelsHint) {
+                const bits = [];
+                bits.push(fullR.ok ? 'снимок execution' : 'execution: HTTP ' + fullR.status);
+                bits.push(evR.ok ? 'события' : 'events: HTTP ' + evR.status);
+                livePanelsHint.textContent = bits.join(' · ');
+            }
+        }
+
+        async function fetchUnified(fromAutoPoll) {
+            const id = getId();
+            if (!id) {
+                alert('Введите execution ID');
+                return;
+            }
+            clearLivePanelsFastLoop();
+            const r = await apiGetExecution(id, '/unified-status');
+            const ok = await applyUnifiedUI(r);
+            if (ok) {
+                await refreshLivePanels(!!fromAutoPoll);
+            }
+            scheduleLivePanelsFastLoop();
+            sendAdminRunsSubscribe();
+        }
+
+        async function fetchFull() {
+            const id = getId();
+            if (!id) {
+                alert('Введите execution ID');
+                return;
+            }
+            const r = await apiGetExecution(id, '');
+            const hint = friendlyApiHint(r);
+            if (hint) setRunsHint(hint.text, hint.variant);
+            else setRunsHint('');
+            if (r.networkError) {
+                setPanel(outFull, 'Ошибка сети: ' + r.networkError, false);
+                return;
+            }
+            setPanel(outFull, JSON.stringify(r.data, null, 2), false);
+            if (r.data && r.data.success && r.data.execution) {
+                recordRecentExecutionId(id);
+            }
+        }
+
+        async function fetchEvents() {
+            const id = getId();
+            if (!id) {
+                alert('Введите execution ID');
+                return;
+            }
+            const r = await apiGetExecution(id, '/events');
+            const hint = friendlyApiHint(r);
+            if (hint) setRunsHint(hint.text, hint.variant);
+            else setRunsHint('');
+            if (r.networkError) {
+                setPanel(outEvents, 'Ошибка сети: ' + r.networkError, false);
+                return;
+            }
+            setPanel(outEvents, JSON.stringify(r.data, null, 2), false);
+        }
+
+        function fmtShort(iso) {
+            if (!iso) return '—';
+            try {
+                const d = new Date(iso);
+                return isNaN(d.getTime()) ? iso : d.toLocaleString();
+            } catch {
+                return iso;
+            }
+        }
+
+        function dbRecentQueryUrl() {
+            const lim = Math.min(100, Math.max(1, parseInt(String(dbRecentLimit && dbRecentLimit.value), 10) || 40));
+            const params = new URLSearchParams();
+            params.set('limit', String(lim));
+            const scen = (dbRecentScenario && dbRecentScenario.value || '').trim();
+            if (scen) params.set('scenarioId', scen);
+            return '/api/executions?' + params.toString();
+        }
+
+        async function loadDbRecent() {
+            if (!dbRecentTableHost || !dbRecentHint) return;
+            dbRecentTableHost.innerHTML = '';
+            let res;
+            try {
+                res = await fetch(dbRecentQueryUrl(), withTenantHeaders());
+            } catch (e) {
+                dbRecentHint.textContent = 'Сеть: ' + (e.message || String(e));
+                return;
+            }
+            const text = await res.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch {
+                dbRecentHint.textContent = 'Ответ не JSON (HTTP ' + res.status + ')';
+                return;
+            }
+            if (!data.success) {
+                const msg = (data.error && data.error.message) || JSON.stringify(data);
+                dbRecentHint.textContent = 'Ошибка: ' + msg;
+                return;
+            }
+            const list = data.executions || [];
+            const scen = (dbRecentScenario && dbRecentScenario.value || '').trim();
+            const filterNote = scen ? ' (фильтр scenarioId)' : '';
+            dbRecentHint.textContent = list.length
+                ? 'Записей: ' + list.length + filterNote
+                : (scen ? 'Нет выполнений для этого scenarioId.' : 'В БД пока нет выполнений.');
+            if (!list.length) {
+                const p = document.createElement('p');
+                p.className = 'db-recent-empty';
+                p.textContent = scen
+                    ? 'Проверьте uuid сценария (колонка id в списке сценариев).'
+                    : 'Пусто — запустите сценарий через оркестратор или демо с записью в ту же БД.';
+                dbRecentTableHost.appendChild(p);
+                return;
+            }
+            const table = document.createElement('table');
+            table.className = 'db-recent-table';
+            table.innerHTML = '<thead><tr><th>executionId</th><th>scenarioId</th><th>status</th><th>runtime</th><th>node</th><th>started</th></tr></thead><tbody></tbody>';
+            const tb = table.querySelector('tbody');
+            list.forEach((row) => {
+                const tr = document.createElement('tr');
+                tr.title = 'Нажмите — подставить ID и запросить единый статус';
+                tr.innerHTML =
+                    '<td>' + (row.executionId || '').replace(/</g, '&lt;') + '</td>' +
+                    '<td>' + (row.scenarioId || '').replace(/</g, '&lt;') + '</td>' +
+                    '<td>' + (row.status || '') + '</td>' +
+                    '<td>' + (row.runtimeKind || '') + '</td>' +
+                    '<td>' + (row.currentNodeId || '—') + '</td>' +
+                    '<td>' + fmtShort(row.startedAt) + '</td>';
+                tr.addEventListener('click', () => {
+                    execId.value = row.executionId;
+                    sendAdminRunsSubscribe();
+                    fetchUnified();
+                });
+                tb.appendChild(tr);
+            });
+            dbRecentTableHost.appendChild(table);
+        }
+
+        document.getElementById('btnUnified').addEventListener('click', fetchUnified);
+        document.getElementById('btnFull').addEventListener('click', fetchFull);
+        document.getElementById('btnEvents').addEventListener('click', fetchEvents);
+
+        document.getElementById('btnClearRecent').addEventListener('click', () => {
+            localStorage.removeItem(LS_RECENT);
+            renderRecentChips();
+        });
+
+        document.getElementById('btnDbRecent').addEventListener('click', loadDbRecent);
+
+        if (autoDbRecent) {
+            autoDbRecent.addEventListener('change', (ev) => {
+                if (dbRefreshTimer) {
+                    clearInterval(dbRefreshTimer);
+                    dbRefreshTimer = null;
+                }
+                if (ev.target.checked) {
+                    loadDbRecent();
+                    dbRefreshTimer = setInterval(loadDbRecent, 10000);
+                }
+            });
+        }
+
+        document.getElementById('autoRefresh').addEventListener('change', (ev) => {
+            clearAutoUnifiedLoop();
+            clearLivePanelsFastLoop();
+            closeAdminRunsWebSocket();
+            if (ev.target.checked) {
+                fetchUnified().then(() => {
+                    if (useWsStream()) {
+                        syncAdminRunsWebSocket();
+                    } else {
+                        scheduleAutoUnifiedLoop();
+                        scheduleLivePanelsFastLoop();
+                    }
+                });
+            }
+        });
+
+        if (useWsStreamEl) {
+            useWsStreamEl.addEventListener('change', () => {
+                clearAutoUnifiedLoop();
+                clearLivePanelsFastLoop();
+                closeAdminRunsWebSocket();
+                const ar = document.getElementById('autoRefresh');
+                if (ar && ar.checked) {
+                    if (useWsStream()) {
+                        syncAdminRunsWebSocket();
+                    } else {
+                        scheduleAutoUnifiedLoop();
+                        scheduleLivePanelsFastLoop();
+                    }
+                }
+            });
+        }
+
+        window.addEventListener('scenarioBuilder:tenantChanged', () => {
+            if (adminRunsWs && adminRunsWs.readyState === WebSocket.OPEN) {
+                sendAdminRunsSubscribe();
+            }
+        });
+
+        if (autoLivePanels) {
+            autoLivePanels.addEventListener('change', () => {
+                clearLivePanelsFastLoop();
+                if (getId()) refreshLivePanels(false);
+                scheduleLivePanelsFastLoop();
+                sendAdminRunsSubscribe();
+            });
+        }
+
+        if (liveFastPoll) {
+            liveFastPoll.addEventListener('change', () => {
+                clearLivePanelsFastLoop();
+                scheduleLivePanelsFastLoop();
+                sendAdminRunsSubscribe();
+            });
+        }
+
+        execId.addEventListener('change', () => {
+            sendAdminRunsSubscribe();
+        });
+
+        window.addEventListener('load', () => {
+            renderRecentChips();
+            const qs = new URLSearchParams(window.location.search);
+            const q = qs.get('execution');
+            if (q) {
+                execId.value = q;
+                sendAdminRunsSubscribe();
+                fetchUnified();
+            }
+            const scenQ = qs.get('scenarioId');
+            if (scenQ && dbRecentScenario) {
+                dbRecentScenario.value = scenQ;
+            }
+        });
+    </script>
+<script src="/admin-common-rbac.js"></script>
+</body>
+</html>

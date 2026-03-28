@@ -20,6 +20,7 @@ import { ScenarioSpec } from '../spec';
 import { traceAsync, addSpanAttributes, addSpanEvent, systemMetrics } from '../observability';
 import { getLogger } from '../observability/logger';
 import type { AuditService } from '../audit/audit-service';
+import { estimateToolCallCostUsd } from '../utils/tool-call-cost';
 
 /**
  * Конфигурация LLM
@@ -41,6 +42,8 @@ export interface LLMMessage {
   content: string;
   name?: string; // для tool calls
   toolCallId?: string; // для tool responses
+  /** Нативные tool_calls ассистента (OpenAI и др.) */
+  toolCalls?: LLMToolCall[];
 }
 
 /**
@@ -82,6 +85,13 @@ export interface AgentExecutionContext {
   userIntent: string;
   traceId?: string;
   spanId?: string;
+  deploymentLane?: string;
+  /** Shadow-canary: инструменты через gateway — заглушка */
+  shadowToolStub?: boolean;
+  /** Накопленная оценка затрат USD за execution (проброс в OPA перед каждым tool call) */
+  executionSpendUsd?: number;
+  /** Тенант (X-Tenant-ID) → ToolRequestContext и OPA input */
+  tenantId?: string;
 }
 
 /**
@@ -178,6 +188,16 @@ export class AgentRuntime {
             traceId: context.traceId,
             spanId: context.spanId,
           });
+
+          this.costManager.resetExecution(context.scenarioId);
+          const tokenBudget = context.scenarioSpec.nonFunctional?.tokenBudget;
+          if (tokenBudget) {
+            this.costManager.setBudget(context.scenarioId, {
+              maxPerExecution: tokenBudget.maxPerExecution ?? 1_000_000,
+              maxPerDay: tokenBudget.maxPerDay ?? 10_000_000,
+              maxPerMonth: 100_000_000
+            });
+          }
 
           // 3. Получение контекста из памяти
           const memoryContext = this.getMemoryContext(context);
@@ -395,15 +415,14 @@ Do not just return tool call JSON - always follow up with a natural language exp
       }
       // Если есть tool calls, проверка output будет выполнена после их выполнения
 
-      // Если есть текстовый ответ (и нет tool calls), добавляем его
-      // Если есть только tool calls без текста, не добавляем пустое сообщение
-      if (llmResponse.content && (!llmResponse.toolCalls || llmResponse.toolCalls.length === 0)) {
+      // Ассистент: либо только текст, либо tool_calls (в т.ч. для OpenAI — обязательная пара assistant+tool)
+      if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
         messages.push({
           role: 'assistant',
-          content: llmResponse.content
+          content: llmResponse.content ?? '',
+          toolCalls: llmResponse.toolCalls
         });
-      } else if (llmResponse.content && llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
-        // Если есть и текст и tool calls, добавляем текст (он может быть пояснением перед tool call)
+      } else if (llmResponse.content) {
         messages.push({
           role: 'assistant',
           content: llmResponse.content
@@ -592,21 +611,42 @@ Do not just return tool call JSON - always follow up with a natural language exp
               maxTokens: this.llmConfig.maxTokens
             });
             const response = await provider.call(messages, availableTools);
-            
+
             const duration = (Date.now() - startTime) / 1000;
             systemMetrics.agentLLMDuration.record(duration);
-            
+
             addSpanAttributes({
               'llm.finish_reason': response.finishReason,
               'llm.tokens': response.usage?.totalTokens || 0,
-              'llm.tool_calls': response.toolCalls?.length || 0,
+              'llm.tool_calls': response.toolCalls?.length || 0
             });
 
             return response;
           }
 
-          // Для других провайдеров (OpenAI, Anthropic) - заглушка
-          // В реальной системе здесь будет интеграция с соответствующими API
+          if (this.llmConfig.provider === 'openai') {
+            const { OpenAIProvider } = await import('./llm-providers/openai-provider');
+            const provider = new OpenAIProvider({
+              apiKey: this.llmConfig.apiKey,
+              baseUrl: this.llmConfig.baseUrl,
+              model: this.llmConfig.model,
+              temperature: this.llmConfig.temperature,
+              maxTokens: this.llmConfig.maxTokens
+            });
+            const response = await provider.call(messages, availableTools);
+
+            const duration = (Date.now() - startTime) / 1000;
+            systemMetrics.agentLLMDuration.record(duration);
+
+            addSpanAttributes({
+              'llm.finish_reason': response.finishReason,
+              'llm.tokens': response.usage?.totalTokens || 0,
+              'llm.tool_calls': response.toolCalls?.length || 0
+            });
+
+            return response;
+          }
+
           const response = {
             content: 'I will help you with that.',
             finishReason: 'stop' as const,
@@ -616,10 +656,10 @@ Do not just return tool call JSON - always follow up with a natural language exp
               totalTokens: this.estimateTokens(messages) + 50
             }
           };
-          
+
           const duration = (Date.now() - startTime) / 1000;
           systemMetrics.agentLLMDuration.record(duration);
-          
+
           return response;
         } catch (error) {
           const duration = (Date.now() - startTime) / 1000;
@@ -649,13 +689,28 @@ Do not just return tool call JSON - always follow up with a natural language exp
     }
 
     const inputs = JSON.parse(toolCall.function.arguments);
+    const reserveTokens = 512;
+    const costGuardExceeded = !this.costManager.canUseTokens(
+      context.scenarioId,
+      reserveTokens
+    );
+    const usageStats = this.costManager.getUsageStats(context.scenarioId);
+    const tokensUsedSoFar =
+      usageStats.limitExecution !== Infinity ? usageStats.execution : undefined;
+    const spendBefore = context.executionSpendUsd ?? 0;
     const requestContext: ToolRequestContext = {
       scenarioId: context.scenarioId,
       executionId: context.executionId,
       userId: context.userId,
       userRoles: context.userRoles,
       traceId: context.traceId,
-      spanId: context.spanId
+      spanId: context.spanId,
+      deploymentLane: context.deploymentLane,
+      shadowToolStub: context.shadowToolStub === true,
+      costGuardExceeded: costGuardExceeded ? true : undefined,
+      tokensUsedSoFar,
+      executionSpendUsd: spendBefore > 0 ? spendBefore : undefined,
+      tenantId: context.tenantId ?? 'default'
     };
 
     const request: ToolRequest = {
@@ -668,6 +723,7 @@ Do not just return tool call JSON - always follow up with a natural language exp
     const response = await this.gateway.execute(request, tool);
 
     if (response.success) {
+      context.executionSpendUsd = spendBefore + estimateToolCallCostUsd(tool);
       return response.outputs || {};
     } else {
       return { error: response.error?.message || 'Tool execution failed' };

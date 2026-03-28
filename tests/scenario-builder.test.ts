@@ -102,6 +102,40 @@ describe('ScenarioBuilder', () => {
     expect(Array.isArray(policy.requiresApproval)).toBe(true);
   });
 
+  it('должен прокидывать canaryAllowedTools в ExecutionPolicy', () => {
+    const spec = createTestSpec();
+    spec.canaryAllowedTools = ['tool-1'];
+    const policy = builder.generateExecutionPolicy(spec);
+    expect(policy.canaryAllowedTools).toEqual(['tool-1']);
+  });
+
+  it('должен прокидывать canaryBlockedToolIds в ExecutionPolicy', () => {
+    const spec = createTestSpec();
+    spec.canaryBlockedToolIds = ['danger-tool'];
+    const policy = builder.generateExecutionPolicy(spec);
+    expect(policy.canaryBlockedToolIds).toEqual(['danger-tool']);
+  });
+
+  it('должен прокидывать stableBlockedToolIds в ExecutionPolicy', () => {
+    const spec = createTestSpec();
+    spec.stableBlockedToolIds = ['new-api-tool'];
+    const policy = builder.generateExecutionPolicy(spec);
+    expect(policy.stableBlockedToolIds).toEqual(['new-api-tool']);
+  });
+
+  it('должен прокидывать PII и risk class в ExecutionPolicy для OPA', () => {
+    const spec = createTestSpec();
+    spec.dataContract = {
+      sources: ['crm'],
+      quality: { required: true },
+      piiClassification: 'high'
+    };
+    spec.riskClass = RiskClass.MEDIUM;
+    const policy = builder.generateExecutionPolicy(spec);
+    expect(policy.scenarioPiiClassification).toBe('high');
+    expect(policy.scenarioRiskClass).toBe('medium');
+  });
+
   it('должен генерировать deployment descriptor', () => {
     const spec = createTestSpec();
     const descriptor = builder.generateDeploymentDescriptor(spec);
@@ -118,5 +152,30 @@ describe('ScenarioBuilder', () => {
     const descriptor = builder.generateDeploymentDescriptor(spec);
     expect(descriptor.strategy).toBe('canary');
     expect(descriptor.canaryConfig).toBeDefined();
+  });
+
+  it('должен использовать shadow для среднего риска', () => {
+    const spec = createTestSpec();
+    spec.riskClass = RiskClass.MEDIUM;
+    const descriptor = builder.generateDeploymentDescriptor(spec);
+    expect(descriptor.strategy).toBe('shadow');
+    expect(descriptor.shadowConfig?.enabled).toBe(true);
+    expect(descriptor.shadowConfig?.percentage).toBe(10);
+  });
+
+  it('deployment в spec переопределяет эвристику по riskClass', () => {
+    const spec = createTestSpec();
+    spec.riskClass = RiskClass.MEDIUM;
+    spec.deployment = { strategy: 'all-at-once' };
+    const descriptor = builder.generateDeploymentDescriptor(spec);
+    expect(descriptor.strategy).toBe('all-at-once');
+  });
+
+  it('deployment.canaryPercentage задаёт долю canary', () => {
+    const spec = createTestSpec();
+    spec.deployment = { strategy: 'canary', canaryPercentage: 25 };
+    const descriptor = builder.generateDeploymentDescriptor(spec);
+    expect(descriptor.strategy).toBe('canary');
+    expect(descriptor.canaryConfig?.percentage).toBe(25);
   });
 });

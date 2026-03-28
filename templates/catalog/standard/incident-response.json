@@ -1,0 +1,61 @@
+{
+  "version": "0.1.0",
+  "id": "tpl-incident-response",
+  "name": "Incident Response Automation",
+  "description": "Detect, assess severity, notify team, and create ticket with human-in-the-loop for critical",
+  "goal": "Automate incident triage with LLM severity assessment and team notification",
+  "category": "standard",
+  "difficulty": "medium",
+  "tags": ["ops", "incident", "notification", "human-in-the-loop"],
+  "kpi": [
+    { "name": "response_time", "target": 60000, "unit": "milliseconds" },
+    { "name": "correct_severity", "target": 0.85, "unit": "percentage" }
+  ],
+  "triggers": [
+    { "type": "event", "source": "monitoring.alerts", "config": { "eventType": "alert_fired" } }
+  ],
+  "allowedActions": [
+    {
+      "id": "get-alert",
+      "name": "Get Alert Details",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "assess-severity",
+      "name": "Assess Severity",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "notify-team",
+      "name": "Notify On-Call Team",
+      "version": "1.0.0",
+      "riskClass": "moderate",
+      "requiresApproval": false,
+      "rateLimit": 10
+    },
+    {
+      "id": "create-ticket",
+      "name": "Create Incident Ticket",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    }
+  ],
+  "riskClass": "moderate",
+  "nonFunctional": {
+    "sla": { "availability": 0.999, "latency": { "p95": 60000 } },
+    "cost": { "maxPerExecution": 0.15 },
+    "tokenBudget": { "maxPerExecution": 4000 }
+  },
+  "observability": {
+    "metrics": ["response_time", "correct_severity", "notification_delivery"],
+    "alerts": [
+      { "name": "slow_response", "condition": "response_time > 120000", "severity": "error" }
+    ]
+  },
+  "owner": "platform-team"
+}

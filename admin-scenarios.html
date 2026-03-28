@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scenarios Management - Admin Dashboard</title>
+    <title>Scenarios — Scenario Builder</title>
     <link rel="stylesheet" href="/admin-styles.css">
     <style>
         .scenarios-header {
@@ -174,9 +174,17 @@
                     <span>📈</span>
                     <span>Monitoring</span>
                 </a>
+                <a href="/admin-runs.html" class="nav-link">
+                    <span>🎯</span>
+                    <span>Выполнения</span>
+                </a>
                 <a href="/admin-scenarios.html" class="nav-link active">
                     <span>📋</span>
                     <span>Scenarios</span>
+                </a>
+                <a href="/admin-spec-studio.html" class="nav-link">
+                    <span>✏️</span>
+                    <span>Конструктор</span>
                 </a>
                 <a href="/admin-queues.html" class="nav-link">
                     <span>🔄</span>
@@ -214,10 +222,16 @@
                     <option value="archived">Archived</option>
                 </select>
             </div>
-            <button class="action-btn" onclick="openCreateModal()">
-                <span>➕</span>
-                <span>Create Scenario</span>
-            </button>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <a href="/admin-spec-studio.html" class="action-btn secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+                    <span>✏️</span>
+                    <span>Конструктор spec</span>
+                </a>
+                <button class="action-btn" onclick="openCreateModal()">
+                    <span>➕</span>
+                    <span>Create Scenario</span>
+                </button>
+            </div>
         </div>
 
         <div id="scenariosList">
@@ -257,7 +271,10 @@
                 </div>
                 <div class="config-item">
                     <label class="config-label">Scenario Spec (JSON) *</label>
-                    <div class="config-description">Введите валидный JSON с ScenarioSpec</div>
+                    <div class="config-description">Введите валидный JSON с ScenarioSpec. Из формы-конструктора: «Создать сценарий…» или «Запомнить для формы», затем кнопка ниже.</div>
+                    <div style="margin-bottom:8px;">
+                        <button type="button" class="action-btn btn-small secondary" onclick="importSpecFromStudio()">Подставить из конструктора</button>
+                    </div>
                     <textarea class="json-editor" id="scenarioSpec" required></textarea>
                 </div>
                 <div class="form-actions">
@@ -265,6 +282,16 @@
                     <button type="submit" class="action-btn">Save</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <div id="executionsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="executionsModalTitle">Выполнения</h2>
+                <button type="button" class="close-btn" onclick="closeExecutionsModal()">×</button>
+            </div>
+            <div id="executionsModalBody"></div>
         </div>
     </div>
 
@@ -278,7 +305,7 @@
             try {
                 const status = document.getElementById('statusFilter').value;
                 const url = `/api/scenarios${status ? `?status=${status}` : ''}`;
-                const response = await fetch(url);
+                const response = await fetch(url, withTenantHeaders());
                 const data = await response.json();
                 
                 if (data.success) {
@@ -342,6 +369,8 @@
             `).join('');
         }
 
+        const LS_PENDING_CREATE_SPEC = 'scenarioBuilder.pendingCreateSpecJson';
+
         // Открытие модального окна создания
         function openCreateModal() {
             currentEditingId = null;
@@ -359,6 +388,49 @@
                 allowedActions: []
             }, null, 2);
             document.getElementById('scenarioModal').classList.add('show');
+        }
+
+        /** Редирект из admin-spec-studio (?openCreate=1): подставить JSON и открыть модалку */
+        function openCreateModalFromPendingSpec() {
+            const raw = localStorage.getItem(LS_PENDING_CREATE_SPEC);
+            currentEditingId = null;
+            document.getElementById('modalTitle').textContent = 'Create Scenario';
+            document.getElementById('scenarioId').value = '';
+            document.getElementById('scenarioStatus').value = 'draft';
+            if (!raw) {
+                openCreateModal();
+                return;
+            }
+            localStorage.removeItem(LS_PENDING_CREATE_SPEC);
+            let spec;
+            try {
+                spec = JSON.parse(raw);
+            } catch {
+                openCreateModal();
+                return;
+            }
+            document.getElementById('scenarioName').value = (spec && spec.name) || '';
+            document.getElementById('scenarioDescription').value = (spec && spec.description) || '';
+            document.getElementById('scenarioSpec').value = JSON.stringify(spec, null, 2);
+            document.getElementById('scenarioModal').classList.add('show');
+        }
+
+        function importSpecFromStudio() {
+            const raw = localStorage.getItem(LS_PENDING_CREATE_SPEC);
+            if (!raw) {
+                alert('Нет сохранённого JSON. В конструкторе (/admin-spec-studio.html) нажмите «Запомнить для формы» или «Создать сценарий…».');
+                return;
+            }
+            try {
+                const spec = JSON.parse(raw);
+                document.getElementById('scenarioSpec').value = JSON.stringify(spec, null, 2);
+                const nameEl = document.getElementById('scenarioName');
+                const descEl = document.getElementById('scenarioDescription');
+                if (!nameEl.value.trim() && spec.name) nameEl.value = spec.name;
+                if (!descEl.value.trim() && spec.description) descEl.value = spec.description;
+            } catch (e) {
+                alert('Некорректный JSON в localStorage: ' + e.message);
+            }
         }
 
         // Редактирование сценария
@@ -429,9 +501,9 @@
             }
 
             try {
-                const response = await fetch(`/api/scenarios/${id}`, {
+                const response = await fetch(`/api/scenarios/${id}`, withTenantHeaders({
                     method: 'DELETE'
-                });
+                }));
                 
                 const data = await response.json();
                 
@@ -445,10 +517,18 @@
             }
         }
 
+        function closeExecutionsModal() {
+            document.getElementById('executionsModal').classList.remove('show');
+        }
+
+        document.getElementById('executionsModal').addEventListener('click', (e) => {
+            if (e.target.id === 'executionsModal') closeExecutionsModal();
+        });
+
         // Просмотр выполнений сценария
         async function viewExecutions(scenarioId) {
             try {
-                const response = await fetch(`/api/scenarios/${scenarioId}/executions`);
+                const response = await fetch(`/api/scenarios/${scenarioId}/executions`, withTenantHeaders());
                 const data = await response.json();
                 
                 if (data.success) {
@@ -457,23 +537,26 @@
                         ? executions.map(exec => `
                             <div class="execution-item">
                                 <div>
-                                    <strong>${exec.executionId}</strong>
+                                    <strong>${escapeHtml(exec.executionId)}</strong>
                                     <span class="status-badge ${exec.status === 'completed' ? 'success' : exec.status === 'failed' ? 'error' : 'info'}" style="margin-left: 12px;">
-                                        ${exec.status}
+                                        ${escapeHtml(exec.status)}
                                     </span>
                                     <div style="font-size: 0.875em; color: var(--text-secondary); margin-top: 4px;">
                                         Started: ${new Date(exec.startedAt).toLocaleString()}
                                         ${exec.completedAt ? ` | Completed: ${new Date(exec.completedAt).toLocaleString()}` : ''}
                                     </div>
                                 </div>
-                                <a href="/admin-monitoring.html?execution=${exec.executionId}" class="action-btn btn-small">
-                                    View Details →
+                                <a href="/admin-runs.html?execution=${encodeURIComponent(exec.executionId)}" class="action-btn btn-small">
+                                    Трекер →
                                 </a>
                             </div>
                         `).join('')
-                        : '<div class="empty-state"><p>No executions found</p></div>';
-                    
-                    alert(`Executions for scenario:\n\n${executionsHtml.replace(/<[^>]*>/g, '')}`);
+                        : '<div class="empty-state"><p>Нет выполнений</p></div>';
+
+                    document.getElementById('executionsModalTitle').textContent = 'Выполнения сценария';
+                    document.getElementById('executionsModalBody').innerHTML =
+                        '<div class="executions-list">' + executionsHtml + '</div>';
+                    document.getElementById('executionsModal').classList.add('show');
                 } else {
                     alert('Error: ' + (data.error?.message || 'Unknown error'));
                 }
@@ -502,6 +585,11 @@
         window.addEventListener('load', () => {
             loadScenarios();
             document.getElementById('statusFilter').addEventListener('change', loadScenarios);
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('openCreate') === '1') {
+                window.history.replaceState({}, '', '/admin-scenarios.html');
+                openCreateModalFromPendingSpec();
+            }
         });
 
         // Закрытие модального окна по клику вне его
@@ -511,5 +599,6 @@
             }
         });
     </script>
+<script src="/admin-common-rbac.js"></script>
 </body>
 </html>

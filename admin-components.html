@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Components - Admin Dashboard</title>
+    <title>Components — Scenario Builder</title>
     <link rel="stylesheet" href="/admin-styles.css">
 </head>
 <body>
@@ -30,9 +30,17 @@
                     <span>📈</span>
                     <span>Monitoring</span>
                 </a>
+                <a href="/admin-runs.html" class="nav-link">
+                    <span>🎯</span>
+                    <span>Выполнения</span>
+                </a>
                 <a href="/admin-scenarios.html" class="nav-link">
                     <span>📋</span>
                     <span>Scenarios</span>
+                </a>
+                <a href="/admin-spec-studio.html" class="nav-link">
+                    <span>✏️</span>
+                    <span>Конструктор</span>
                 </a>
                 <a href="/admin-config.html" class="nav-link">
                     <span>⚙️</span>
@@ -130,5 +138,6 @@
 
         window.addEventListener('load', loadComponents);
     </script>
+<script src="/admin-common-rbac.js"></script>
 </body>
 </html>

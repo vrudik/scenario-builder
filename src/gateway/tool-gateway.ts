@@ -11,6 +11,17 @@
 import { RegisteredTool } from '../registry';
 import { ExecutionPolicy } from '../builder';
 import type { AuditService } from '../audit/audit-service';
+import { evaluateLocalToolAccess } from '../policy/local-tool-policy';
+import type { OpaHttpClient } from '../policy/opa-http-client';
+import { redactOpaScenarioInput } from './opa-input-pii';
+import { systemMetrics } from '../observability/metrics';
+
+function prometheusDeploymentLane(lane?: string): 'stable' | 'canary' | 'unset' {
+  if (lane === 'stable' || lane === 'canary') {
+    return lane;
+  }
+  return 'unset';
+}
 
 /**
  * Контекст запроса к инструменту
@@ -23,6 +34,24 @@ export interface ToolRequestContext {
   traceId?: string;
   spanId?: string;
   idempotencyKey?: string;
+  /** Полоса деплоя (canary / stable) для метрик и аудита */
+  deploymentLane?: string;
+  /** Проброс в OPA input.cost_guard_exceeded (рантайм cost-manager / оркестратор) */
+  costGuardExceeded?: boolean;
+  /** Токены уже израсходованы в этом execution (OPA: сравнение с tokenLimits.maxPerExecution) */
+  tokensUsedSoFar?: number;
+  /** Фактические затраты в USD за выполнение, если рантайм их считает (OPA vs costLimits.maxPerExecution) */
+  executionSpendUsd?: number;
+  /**
+   * Shadow-canary прогон: после политик не вызывать реальный executor (как sandbox), только метрики/аудит.
+   */
+  shadowToolStub?: boolean;
+  /** Тенант API (как X-Tenant-ID); в OPA input как tenantId для правил по организации */
+  tenantId?: string;
+  /** Organization ID for OPA policy evaluation */
+  orgId?: string;
+  /** Deployment environment (e.g. 'production', 'staging', 'development') */
+  environment?: string;
 }
 
 /**
@@ -159,12 +188,20 @@ export class ToolGateway {
   private sandboxMode: boolean = false;
   private toolExecutors: Map<string, (req: ToolRequest) => Promise<ToolResponse>> = new Map();
   private auditService?: AuditService;
+  private opaClient?: OpaHttpClient;
 
   /**
    * Установка политики исполнения
    */
   setPolicy(policy: ExecutionPolicy): void {
     this.policy = policy;
+  }
+
+  /**
+   * OPA Data API (например opa run --server). Правило: package scenario, boolean allow.
+   */
+  setOpaClient(client: OpaHttpClient | undefined): void {
+    this.opaClient = client;
   }
 
   /**
@@ -230,8 +267,8 @@ export class ToolGateway {
       }
     }
 
-    // Проверка политики доступа
-    if (!this.checkAccess(request, tool)) {
+    // Проверка политики доступа (локальная ExecutionPolicy + опционально OPA)
+    if (!(await this.resolvePolicyAccess(request, tool))) {
       void this.auditService?.logToolCall({
         action: 'tool_call_denied',
         toolId: request.toolId,
@@ -242,6 +279,9 @@ export class ToolGateway {
         message: 'Access denied by policy',
         traceId: request.context.traceId,
         spanId: request.context.spanId,
+        details: request.context.deploymentLane
+          ? { deploymentLane: request.context.deploymentLane }
+          : undefined
       });
       return {
         success: false,
@@ -293,8 +333,9 @@ export class ToolGateway {
       };
     }
 
-    // Sandbox режим - возвращаем заглушку
-    if (this.sandboxMode) {
+    // Sandbox / shadow-canary — заглушка без вызова executor
+    if (this.sandboxMode || request.context.shadowToolStub) {
+      const stubKind = this.sandboxMode ? 'sandbox' : 'shadow_stub';
       void this.auditService?.logToolCall({
         action: 'tool_call_completed',
         toolId: request.toolId,
@@ -302,9 +343,12 @@ export class ToolGateway {
         scenarioId: request.context.scenarioId,
         userId: request.context.userId,
         outcome: 'success',
-        message: 'Sandbox mode',
+        message: this.sandboxMode ? 'Sandbox mode' : 'Shadow canary stub',
         traceId: request.context.traceId,
         spanId: request.context.spanId,
+        details: request.context.deploymentLane
+          ? { deploymentLane: request.context.deploymentLane, [stubKind]: true }
+          : { [stubKind]: true }
       });
       return {
         success: true,
@@ -326,6 +370,9 @@ export class ToolGateway {
       userId: request.context.userId,
       traceId: request.context.traceId,
       spanId: request.context.spanId,
+      details: request.context.deploymentLane
+        ? { deploymentLane: request.context.deploymentLane }
+        : undefined
     });
 
     // Выполнение запроса
@@ -341,7 +388,12 @@ export class ToolGateway {
           scenarioId: request.context.scenarioId,
           userId: request.context.userId,
           outcome: 'success',
-          details: { latency: Date.now() - startTime },
+          details: {
+            latency: Date.now() - startTime,
+            ...(request.context.deploymentLane
+              ? { deploymentLane: request.context.deploymentLane }
+              : {})
+          },
           traceId: request.context.traceId,
           spanId: request.context.spanId,
         });
@@ -357,6 +409,9 @@ export class ToolGateway {
           message: response.error?.message,
           traceId: request.context.traceId,
           spanId: request.context.spanId,
+          details: request.context.deploymentLane
+            ? { deploymentLane: request.context.deploymentLane }
+            : undefined
         });
       }
 
@@ -381,6 +436,9 @@ export class ToolGateway {
         message: error instanceof Error ? error.message : 'Unknown error',
         traceId: request.context.traceId,
         spanId: request.context.spanId,
+        details: request.context.deploymentLane
+          ? { deploymentLane: request.context.deploymentLane }
+          : undefined
       });
       return {
         success: false,
@@ -399,41 +457,70 @@ export class ToolGateway {
     }
   }
 
-  /**
-   * Проверка доступа по политике
-   */
-  private checkAccess(request: ToolRequest, tool: RegisteredTool): boolean {
-    if (!this.policy) {
-      return true; // Если политика не установлена, разрешаем
-    }
-
-    // Проверка, разрешен ли инструмент
-    if (!this.policy.allowedTools.includes(tool.id)) {
-      return false;
-    }
-
-    // Проверка запрещенных действий
-    if (this.policy.forbiddenActions.includes(tool.id)) {
-      return false;
-    }
-
-    // Проверка требований авторизации
-    if (tool.authorization.requiresApproval) {
-      if (!this.policy.requiresApproval.includes(tool.id)) {
-        // В реальной системе здесь должна быть проверка наличия одобрения
-        return false;
+  private async resolvePolicyAccess(request: ToolRequest, tool: RegisteredTool): Promise<boolean> {
+    const localOk = evaluateLocalToolAccess({
+      policy: this.policy,
+      toolId: tool.id,
+      toolAuthorization: {
+        requiresApproval: tool.authorization.requiresApproval,
+        roles: tool.authorization.roles
+      },
+      context: {
+        userId: request.context.userId,
+        userRoles: request.context.userRoles,
+        scenarioId: request.context.scenarioId,
+        executionId: request.context.executionId,
+        deploymentLane: request.context.deploymentLane
       }
-    }
-
-    // Проверка ролей пользователя
-    const hasRequiredRole = tool.authorization.roles.some(role =>
-      request.context.userRoles.includes(role)
-    );
-    if (tool.authorization.roles.length > 0 && !hasRequiredRole) {
+    });
+    if (!localOk) {
+      systemMetrics.gatewayPolicyDenials.add(1, {
+        layer: 'local',
+        deployment_lane: prometheusDeploymentLane(request.context.deploymentLane)
+      });
       return false;
     }
-
-    return true;
+    if (!this.opaClient) {
+      return true;
+    }
+    const opaInput = redactOpaScenarioInput(
+      {
+        toolId: tool.id,
+        tenantId: request.context.tenantId ?? 'default',
+        orgId: request.context.orgId ?? null,
+        environment: request.context.environment ?? 'production',
+        userId: request.context.userId,
+        userRoles: request.context.userRoles,
+        scenarioId: request.context.scenarioId,
+        executionId: request.context.executionId,
+        deploymentLane: request.context.deploymentLane,
+        allowedTools: this.policy?.allowedTools ?? [],
+        forbiddenActions: this.policy?.forbiddenActions ?? [],
+        requiresApproval: this.policy?.requiresApproval ?? [],
+        scenarioPiiClassification: this.policy?.scenarioPiiClassification,
+        scenarioRiskClass: this.policy?.scenarioRiskClass,
+        toolRiskClass: tool.riskClass,
+        costLimits: this.policy?.costLimits ?? {},
+        tokenLimits: this.policy?.tokenLimits ?? {},
+        tokensUsedSoFar: request.context.tokensUsedSoFar,
+        executionSpendUsd: request.context.executionSpendUsd,
+        cost_guard_exceeded: request.context.costGuardExceeded === true,
+        canaryAllowedTools: this.policy?.canaryAllowedTools ?? [],
+        canaryBlockedToolIds: this.policy?.canaryBlockedToolIds ?? [],
+        stableBlockedToolIds: this.policy?.stableBlockedToolIds ?? []
+      },
+      this.policy?.scenarioPiiClassification
+    );
+    const lane = prometheusDeploymentLane(request.context.deploymentLane);
+    const allowed = await this.opaClient.queryAllow('scenario/allow', opaInput);
+    systemMetrics.gatewayOpaDecisions.add(1, {
+      result: allowed ? 'allow' : 'deny',
+      deployment_lane: lane
+    });
+    if (!allowed) {
+      systemMetrics.gatewayPolicyDenials.add(1, { layer: 'opa', deployment_lane: lane });
+    }
+    return allowed;
   }
 
   /**

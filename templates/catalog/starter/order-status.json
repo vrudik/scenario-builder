@@ -1,0 +1,44 @@
+{
+  "version": "0.1.0",
+  "id": "tpl-order-status",
+  "name": "Order Status Lookup",
+  "description": "Check order status and send customer notification",
+  "goal": "Look up order status and notify the customer with a friendly message",
+  "category": "starter",
+  "difficulty": "simple",
+  "tags": ["ecommerce", "starter", "notification"],
+  "kpi": [
+    { "name": "delivery_rate", "target": 0.95, "unit": "percentage" }
+  ],
+  "triggers": [
+    { "type": "event", "source": "orders.events", "config": { "eventType": "status_inquiry" } }
+  ],
+  "allowedActions": [
+    {
+      "id": "get-order",
+      "name": "Get Order Details",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "send-notification",
+      "name": "Send Customer Notification",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false,
+      "rateLimit": 100
+    }
+  ],
+  "riskClass": "low",
+  "nonFunctional": {
+    "sla": { "availability": 0.99, "latency": { "p95": 3000 } },
+    "cost": { "maxPerExecution": 0.03 },
+    "tokenBudget": { "maxPerExecution": 1500 }
+  },
+  "observability": {
+    "metrics": ["execution_time", "delivery_rate"],
+    "alerts": [{ "name": "low_delivery", "condition": "delivery_rate < 0.9", "severity": "warning" }]
+  },
+  "owner": "platform-team"
+}

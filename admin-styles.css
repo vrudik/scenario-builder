@@ -410,6 +410,29 @@ body {
     font-size: 0.875em;
 }
 
+/* Multi-tenant bar (admin-common.js) */
+.admin-tenant-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+.admin-tenant-bar .admin-tenant-label {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.75);
+    white-space: nowrap;
+}
+.admin-tenant-bar .admin-tenant-input {
+    width: 118px;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .nav-links {

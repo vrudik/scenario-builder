@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard - Scenario Builder</title>
+    <title>Admin Dashboard — Scenario Builder</title>
     <link rel="stylesheet" href="/admin-styles.css">
     <style>
         /* Дополнительные стили для workflow steps */
@@ -75,9 +75,17 @@
                     <span>📈</span>
                     <span>Monitoring</span>
                 </a>
+                <a href="/admin-runs.html" class="nav-link">
+                    <span>🎯</span>
+                    <span>Выполнения</span>
+                </a>
                 <a href="/admin-scenarios.html" class="nav-link">
                     <span>📋</span>
                     <span>Scenarios</span>
+                </a>
+                <a href="/admin-spec-studio.html" class="nav-link">
+                    <span>✏️</span>
+                    <span>Конструктор</span>
                 </a>
                 <a href="/admin-queues.html" class="nav-link">
                     <span>🔄</span>
@@ -179,9 +187,17 @@
                     <span>📊</span>
                     <span>Observability</span>
                 </a>
+                <a href="/admin-runs.html" class="action-btn secondary">
+                    <span>🎯</span>
+                    <span>Выполнения (трекер)</span>
+                </a>
                 <a href="/admin-scenarios.html" class="action-btn">
                     <span>📋</span>
                     <span>Manage Scenarios</span>
+                </a>
+                <a href="/admin-spec-studio.html" class="action-btn secondary">
+                    <span>✏️</span>
+                    <span>Spec studio</span>
                 </a>
                 <a href="/admin-queues.html" class="action-btn">
                     <span>🔄</span>
@@ -322,5 +338,6 @@
             setInterval(loadSystemData, 10000); // Обновление каждые 10 секунд
         });
     </script>
+<script src="/admin-common-rbac.js"></script>
 </body>
 </html>

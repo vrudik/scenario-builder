@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Queues Management - Admin Dashboard</title>
+    <title>Queues — Scenario Builder</title>
     <link rel="stylesheet" href="/admin-styles.css">
     <style>
         .queues-header {
@@ -247,9 +247,17 @@
                     <span>📈</span>
                     <span>Monitoring</span>
                 </a>
+                <a href="/admin-runs.html" class="nav-link">
+                    <span>🎯</span>
+                    <span>Выполнения</span>
+                </a>
                 <a href="/admin-scenarios.html" class="nav-link">
                     <span>📋</span>
                     <span>Scenarios</span>
+                </a>
+                <a href="/admin-spec-studio.html" class="nav-link">
+                    <span>✏️</span>
+                    <span>Конструктор</span>
                 </a>
                 <a href="/admin-queues.html" class="nav-link active">
                     <span>🔄</span>
@@ -480,7 +488,7 @@
         // Загрузка сценариев
         async function loadScenarios() {
             try {
-                const response = await fetch('/api/scenarios');
+                const response = await fetch('/api/scenarios', withTenantHeaders());
                 const data = await response.json();
                 if (data.success) {
                     scenarios = data.scenarios || [];
@@ -589,7 +597,7 @@
                 const params = new URLSearchParams();
                 if (statusFilter) params.append('status', statusFilter);
                 
-                const response = await fetch(`/api/queues?${params}`);
+                const response = await fetch(`/api/queues?${params}`, withTenantHeaders());
                 const data = await response.json();
                 
                 if (!data.success) {
@@ -668,7 +676,7 @@
         }
 
         function editQueue(id) {
-            fetch(`/api/queues/${id}`)
+            fetch(`/api/queues/${id}`, withTenantHeaders())
                 .then(r => r.json())
                 .then(data => {
                     if (!data.success) throw new Error(data.error?.message || 'Error loading queue');
@@ -732,7 +740,7 @@
             if (!confirm('Are you sure you want to delete this queue?')) return;
             
             try {
-                const response = await fetch(`/api/queues/${id}`, { method: 'DELETE' });
+                const response = await fetch(`/api/queues/${id}`, withTenantHeaders({ method: 'DELETE' }));
                 const result = await response.json();
                 
                 if (!result.success) {
@@ -750,7 +758,7 @@
             currentQueueId = queueId;
             
             try {
-                const response = await fetch(`/api/queues/${queueId}`);
+                const response = await fetch(`/api/queues/${queueId}`, withTenantHeaders());
                 const data = await response.json();
                 
                 if (!data.success) throw new Error(data.error?.message || 'Error loading queue');
@@ -827,11 +835,11 @@
             };
             
             try {
-                const response = await fetch(`/api/queues/${currentQueueId}/triggers`, {
+                const response = await fetch(`/api/queues/${currentQueueId}/triggers`, withTenantHeaders({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data),
-                });
+                }));
                 
                 const result = await response.json();
                 
@@ -850,9 +858,9 @@
             if (!confirm('Are you sure you want to delete this trigger?')) return;
             
             try {
-                const response = await fetch(`/api/queues/${currentQueueId}/triggers/${triggerId}`, {
+                const response = await fetch(`/api/queues/${currentQueueId}/triggers/${triggerId}`, withTenantHeaders({
                     method: 'DELETE',
-                });
+                }));
                 const result = await response.json();
                 
                 if (!result.success) {
@@ -871,7 +879,7 @@
             
             // Загружаем список сценариев
             try {
-                const response = await fetch('/api/scenarios');
+                const response = await fetch('/api/scenarios', withTenantHeaders());
                 const data = await response.json();
                 
                 if (!data.success) throw new Error(data.error?.message || 'Error loading scenarios');
@@ -914,11 +922,11 @@
             };
             
             try {
-                const response = await fetch(`/api/queues/${currentQueueId}/jobs`, {
+                const response = await fetch(`/api/queues/${currentQueueId}/jobs`, withTenantHeaders({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data),
-                });
+                }));
                 
                 const result = await response.json();
                 
@@ -964,5 +972,6 @@
         // Автообновление статуса процессора каждые 5 секунд
         setInterval(refreshProcessorStatus, 5000);
     </script>
+<script src="/admin-common-rbac.js"></script>
 </body>
 </html>

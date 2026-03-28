@@ -1,68 +1,84 @@
-# 🚀 Быстрый старт
+# Quick Start
 
-## Шаг 1: Установка зависимостей
+## Step 1: Install Dependencies
 
 ```bash
 npm install
 ```
 
-Если возникают проблемы с путями в PowerShell, используйте:
+## Step 2: Verify Setup
 
-```powershell
-Set-Location "C:\Всякое\Конструктор сценариев"
-npm install
+```bash
+npm run typecheck
+npm run build
+npm test -- --run
 ```
 
-## Шаг 2: Запуск веб-интерфейса
+## Step 3: Start the Server
 
-```powershell
-.\start-web.ps1
-```
-
-Или:
+**Light mode** (UI + demo APIs):
 
 ```bash
 npm run web
 ```
 
-## Шаг 3: Открыть браузер
-
-Перейдите по адресу: **http://localhost:3000**
-
-## Шаг 4: Запуск тестов
-
-В новом терминале:
+**Full mode** (Agent Runtime + DB + admin APIs):
 
 ```bash
-npm test
+node server.cjs
 ```
 
-Или с UI интерфейсом:
+## Step 4: Open the Browser
 
-```bash
-npm run test:ui
-```
+Navigate to **http://localhost:3000**
 
-## Что вы увидите в веб-интерфейсе
+| Page | URL |
+|------|-----|
+| Admin Dashboard | `/admin-dashboard.html` |
+| Demo | `/demo-e2e.html` |
+| Trust & Guardrails | `/about-trust.html` |
+| Agent Test | `/test-agent.html` |
 
-1. **Статус системы** - общая информация о компонентах
-2. **Карточки компонентов** - детальный статус каждого модуля:
-   - Scenario Spec
-   - Scenario Builder
-   - Tool Registry
-   - Tool Gateway
-   - Runtime Orchestrator
-3. **Информация о тестах** - какие тесты готовы к запуску
+Port override: `PORT=3001 npm run web` (Linux/macOS) or `$env:PORT=3001; npm run web` (PowerShell).
 
-## Примеры использования
+## Step 5 (Optional): Temporal for Durable Execution
 
-```bash
-# Запуск примера использования
-npm run example
+Three processes needed: **Temporal Server**, **Worker**, and optionally **OPA**.
 
-# Ручной тест
-npm run test:manual
+1. **Temporal** (dev mode):
+   ```bash
+   temporal server start-dev
+   ```
+   Default address: `localhost:7233` (`TEMPORAL_ADDRESS`).
 
-# Проверка типов
-npm run typecheck
-```
+2. **Worker** (after build):
+   ```bash
+   npm run temporal:worker
+   ```
+   For agent nodes: set `TEMPORAL_ENABLE_AGENT=1` and configure LLM (see `.env.example`).
+
+3. **OPA** (optional policy engine):
+   ```bash
+   opa run --server --addr :8181 policies/scenario/tool.rego policies/scenario/lane.rego
+   ```
+   Set `OPA_URL=http://localhost:8181` in `.env`.
+
+4. **Enable Temporal in API**: set `USE_TEMPORAL=true` when running `node server.cjs`.
+
+See also: [Temporal vs In-Memory](TEMPORAL_VS_IN_MEMORY.md), [Web Instructions](WEB_INSTRUCTIONS.md).
+
+## What You'll See
+
+- **Admin Dashboard** — system overview, component status, health checks
+- **Scenarios** — manage declarative scenario specs
+- **Runs** — execution history with audit trail, live WebSocket updates
+- **Spec Studio** — visual scenario spec editor
+- **Templates** — reusable scenario templates
+- **Demo** — one-click demo run with KPI snapshot and guardrails report
+
+## Next Steps
+
+- Explore [API Documentation](../api/API_DOCUMENTATION.md)
+- Set up [Kafka](../setup/KAFKA_SETUP.md) for event streaming
+- Configure [Observability](../setup/OBSERVABILITY_TESTING.md) for tracing
+- Review [Container Runbook](CONTAINER_RUNBOOK.md) for Docker deployment

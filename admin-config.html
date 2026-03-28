@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Configuration - Admin Dashboard</title>
+    <title>Configuration — Scenario Builder</title>
     <link rel="stylesheet" href="/admin-styles.css">
     <style>
         .config-section {
@@ -63,9 +63,17 @@
                     <span>📈</span>
                     <span>Monitoring</span>
                 </a>
+                <a href="/admin-runs.html" class="nav-link">
+                    <span>🎯</span>
+                    <span>Выполнения</span>
+                </a>
                 <a href="/admin-scenarios.html" class="nav-link">
                     <span>📋</span>
                     <span>Scenarios</span>
+                </a>
+                <a href="/admin-spec-studio.html" class="nav-link">
+                    <span>✏️</span>
+                    <span>Конструктор</span>
                 </a>
                 <a href="/admin-config.html" class="nav-link active">
                     <span>⚙️</span>
@@ -161,6 +169,88 @@
             <button class="action-btn config-save-btn" onclick="saveObservabilityConfig()">Сохранить Observability настройки</button>
         </div>
 
+        <!-- Guardrails Configuration -->
+        <div class="section-card config-section">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-icon">🛡️</span>
+                    Guardrails Configuration
+                </h2>
+            </div>
+
+            <div class="config-item">
+                <label class="config-label">Уровень чувствительности</label>
+                <div class="config-description">Определяет, насколько агрессивно guardrails блокируют потенциально опасные шаблоны.</div>
+                <select class="config-input" id="guardrailsSensitivity">
+                    <option value="low">Low — только базовые проверки</option>
+                    <option value="medium">Medium — рекомендуемый баланс</option>
+                    <option value="high">High — максимально строгие проверки</option>
+                </select>
+            </div>
+
+            <div class="config-item">
+                <label class="config-label">Типы рисков</label>
+                <div class="config-description">Включите типы рисков, которые вы хотите блокировать. Наведите курсор, чтобы понять, что именно будет блокироваться.</div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                    <label style="display: flex; gap: 8px; align-items: flex-start;">
+                        <input type="checkbox" id="riskPromptInjection">
+                        <span>
+                            <div><strong>Prompt Injection</strong></div>
+                            <div class="config-description">Блокировка попыток переписать системные инструкции или заставить агента игнорировать правила.</div>
+                        </span>
+                    </label>
+                    <label style="display: flex; gap: 8px; align-items: flex-start;">
+                        <input type="checkbox" id="riskInsecureOutput">
+                        <span>
+                            <div><strong>Опасные команды в ответах</strong></div>
+                            <div class="config-description">Запрет на реально исполняемые опасные команды в ответах (rm -rf /, DROP TABLE и т.п.).</div>
+                        </span>
+                    </label>
+                    <label style="display: flex; gap: 8px; align-items: flex-start;">
+                        <input type="checkbox" id="riskExcessiveAgency">
+                        <span>
+                            <div><strong>Excessive Agency</strong></div>
+                            <div class="config-description">Ограничение количества tool calls за один ответ, чтобы агент не выполнял слишком много действий автоматически.</div>
+                        </span>
+                    </label>
+                    <label style="display: flex; gap: 8px; align-items: flex-start;">
+                        <input type="checkbox" id="riskUnauthorizedCode">
+                        <span>
+                            <div><strong>Опасные инструменты</strong></div>
+                            <div class="config-description">Блокировка инструментов, запускающих произвольный код/команды (system/exec/shell и подобные).</div>
+                        </span>
+                    </label>
+                    <label style="display: flex; gap: 8px; align-items: flex-start;">
+                        <input type="checkbox" id="riskDataLeakage">
+                        <span>
+                            <div><strong>Защита от утечки данных</strong></div>
+                            <div class="config-description">Дополнительные проверки на возможную утечку конфиденциальной информации из контекста и памяти.</div>
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="config-item">
+                <label class="config-label">Максимум tool calls за один ответ</label>
+                <div class="config-description">Применяется, если включен риск “Excessive Agency”.</div>
+                <input type="number" class="config-input" id="maxToolCallsPerResponse" value="10" min="1" max="50" step="1">
+            </div>
+
+            <div class="config-item">
+                <label class="config-label">Кастомные паттерны (Advanced)</label>
+                <div class="config-description">JSON-объект с массивами строк/регулярных выражений. Каждое выражение описывает то, что будет считаться небезопасным. Пример:
+<pre>{
+  "promptInjection": ["ignore all previous instructions"],
+  "insecureOutput": ["rm -rf /"],
+  "toolInputDangerous": ["DROP TABLE"]
+}</pre>
+                </div>
+                <textarea class="config-input" id="guardrailsCustomPatterns" rows="6" style="font-family: 'Courier New', monospace;"></textarea>
+            </div>
+
+            <button class="action-btn config-save-btn" onclick="saveGuardrailsConfig()">Сохранить Guardrails настройки</button>
+        </div>
+
         <!-- System Information -->
         <div class="section-card">
             <div class="section-header">
@@ -221,7 +311,80 @@
             alert('Observability конфигурация сохранена (заглушка):\n' + JSON.stringify(config, null, 2));
         }
 
-        window.addEventListener('load', loadSystemInfo);
+        async function loadGuardrailsConfig() {
+            try {
+                const res = await fetch('/api/guardrails/config');
+                if (!res.ok) {
+                    throw new Error('HTTP ' + res.status);
+                }
+                const data = await res.json();
+                if (!data.success) {
+                    throw new Error(data.error || 'Unknown error');
+                }
+                const cfg = data.config;
+                document.getElementById('guardrailsSensitivity').value = cfg.sensitivity || 'medium';
+                document.getElementById('riskPromptInjection').checked = !!cfg.risks?.promptInjection?.enabled;
+                document.getElementById('riskInsecureOutput').checked = !!cfg.risks?.insecureOutput?.enabled;
+                document.getElementById('riskExcessiveAgency').checked = !!cfg.risks?.excessiveAgency?.enabled;
+                document.getElementById('riskUnauthorizedCode').checked = !!cfg.risks?.unauthorizedCode?.enabled;
+                document.getElementById('riskDataLeakage').checked = !!cfg.risks?.dataLeakage?.enabled;
+                document.getElementById('maxToolCallsPerResponse').value = cfg.risks?.excessiveAgency?.maxToolCallsPerResponse ?? 10;
+
+                const customPatterns = cfg.customPatterns || {};
+                document.getElementById('guardrailsCustomPatterns').value = JSON.stringify(customPatterns, null, 2);
+            } catch (error) {
+                console.error('Failed to load guardrails config', error);
+            }
+        }
+
+        async function saveGuardrailsConfig() {
+            let customPatterns = {};
+            const raw = document.getElementById('guardrailsCustomPatterns').value.trim();
+            if (raw) {
+                try {
+                    customPatterns = JSON.parse(raw);
+                } catch (e) {
+                    alert('Ошибка парсинга JSON в кастомных паттернах: ' + e.message);
+                    return;
+                }
+            }
+
+            const payload = {
+                sensitivity: document.getElementById('guardrailsSensitivity').value,
+                risks: {
+                    promptInjection: { enabled: document.getElementById('riskPromptInjection').checked },
+                    insecureOutput: { enabled: document.getElementById('riskInsecureOutput').checked },
+                    excessiveAgency: {
+                        enabled: document.getElementById('riskExcessiveAgency').checked,
+                        maxToolCallsPerResponse: parseInt(document.getElementById('maxToolCallsPerResponse').value, 10) || 10
+                    },
+                    unauthorizedCode: { enabled: document.getElementById('riskUnauthorizedCode').checked },
+                    dataLeakage: { enabled: document.getElementById('riskDataLeakage').checked }
+                },
+                customPatterns
+            };
+
+            try {
+                const res = await fetch('/api/guardrails/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    throw new Error(data.error || ('HTTP ' + res.status));
+                }
+                alert('Guardrails конфигурация сохранена.');
+            } catch (error) {
+                alert('Ошибка сохранения guardrails конфигурации: ' + error.message);
+            }
+        }
+
+        window.addEventListener('load', () => {
+            loadSystemInfo();
+            loadGuardrailsConfig();
+        });
     </script>
+<script src="/admin-common-rbac.js"></script>
 </body>
 </html>

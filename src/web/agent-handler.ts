@@ -2,64 +2,121 @@
  * Обработчик запросов Agent Runtime для веб-сервера
  */
 
-import { AgentRuntime, LLMConfig } from '../agent/agent-runtime';
+import { AgentRuntime } from '../agent/agent-runtime';
+import { loadLlmConfigFromEnv } from '../agent/llm-config-from-env';
 import { ToolGateway } from '../gateway/tool-gateway';
 import { ToolRegistry } from '../registry/tool-registry';
+import { ScenarioBuilder } from '../builder/scenario-builder';
 import { ScenarioSpecValidator, TriggerType, RiskClass } from '../spec/scenario-spec';
+import type { ScenarioSpec } from '../spec';
+import type { RegisteredTool } from '../registry';
 import { registerAllTools } from '../tools';
+import { OpaHttpClient } from '../policy/opa-http-client';
+import { ScenarioRepository } from '../db/repositories/scenario-repository';
+import { normalizeTenantId } from '../utils/tenant-id';
 
-// Глобальные экземпляры для переиспользования
-let globalRegistry: ToolRegistry | null = null;
-let globalGateway: ToolGateway | null = null;
+export interface ExecuteAgentOptions {
+  tenantId?: string;
+}
 
-/**
- * Создание Agent Runtime с настройками по умолчанию
- */
-export function createAgentRuntime(): AgentRuntime {
-  // Используем глобальные экземпляры для переиспользования зарегистрированных инструментов
-  if (!globalRegistry || !globalGateway) {
-    globalRegistry = new ToolRegistry();
-    globalGateway = new ToolGateway();
-    
-    // Регистрация всех реальных инструментов
-    registerAllTools(globalRegistry, globalGateway);
+function attachOpa(gateway: ToolGateway): void {
+  const opaUrl = process.env.OPA_URL?.trim();
+  if (!opaUrl) {
+    return;
   }
+  gateway.setOpaClient(
+    new OpaHttpClient(opaUrl, {
+      failOpen: process.env.OPA_FAIL_OPEN !== 'false',
+      timeoutMs: Number.parseInt(process.env.OPA_TIMEOUT_MS || '2500', 10) || 2500
+    })
+  );
+}
 
-  // Конфигурация LLM с Ollama
-  const llmConfig: LLMConfig = {
-    provider: 'ollama',
-    model: 'llama3.2:1b',
-    baseUrl: 'http://localhost:11434',
-    temperature: 0.7,
-    maxTokens: 2000
-  };
+async function tryLoadScenarioSpec(
+  scenarioId: string,
+  tenantId: string
+): Promise<ScenarioSpec | null> {
+  if (process.env.ENABLE_DB === 'false') {
+    return null;
+  }
+  if (!process.env.DATABASE_URL?.trim()) {
+    return null;
+  }
+  try {
+    const repo = new ScenarioRepository();
+    const row = await repo.findById(scenarioId, tenantId);
+    return row?.spec ?? null;
+  } catch {
+    return null;
+  }
+}
 
-  const agentRuntime = new AgentRuntime(globalGateway, llmConfig);
+function buildFallbackSpec(scenarioId: string, tools: RegisteredTool[]): ScenarioSpec {
+  const validator = new ScenarioSpecValidator();
+  return validator.parse({
+    version: '0.1.0',
+    id: scenarioId,
+    name: 'Web Scenario',
+    goal: 'Process user request',
+    triggers: [
+      {
+        type: TriggerType.EVENT,
+        source: 'user.request'
+      }
+    ],
+    allowedActions: tools.map(tool => ({
+      id: tool.id,
+      name: tool.name,
+      version: tool.version,
+      riskClass: tool.riskClass,
+      requiresApproval: tool.requiresApproval
+    })),
+    riskClass: RiskClass.LOW
+  });
+}
 
-  // Настройка ролей
+function filterToolsBySpec(allTools: RegisteredTool[], spec: ScenarioSpec): RegisteredTool[] {
+  const allowed = new Set(spec.allowedActions.map(a => a.id));
+  const picked = allTools.filter(t => allowed.has(t.id));
+  return picked.length > 0 ? picked : allTools;
+}
+
+function registerDefaultAgentRole(agentRuntime: AgentRuntime, toolIds: string[]): void {
   const router = agentRuntime.getRouter();
   router.registerRole({
     id: 'general-agent',
     name: 'General Agent',
     description: 'General purpose agent',
     capabilities: ['general', 'information'],
-    allowedTools: ['web-search-tool', 'database-query-tool', 'api-call-tool'],
+    allowedTools: toolIds.length > 0 ? toolIds : ['web-search-tool', 'database-query-tool', 'api-call-tool'],
     priority: 10
   });
+}
 
+/**
+ * Создание Agent Runtime (отдельный gateway + реестр на вызов; политика — в executeAgentRequest).
+ */
+export function createAgentRuntime(): AgentRuntime {
+  const registry = new ToolRegistry();
+  const gateway = new ToolGateway();
+  registerAllTools(registry, gateway);
+  attachOpa(gateway);
+  const agentRuntime = new AgentRuntime(gateway, loadLlmConfigFromEnv());
+  registerDefaultAgentRole(
+    agentRuntime,
+    registry.getAll().map(t => t.id)
+  );
   return agentRuntime;
 }
 
 /**
- * Получение глобального registry (для использования в executeAgentRequest)
+ * Получение registry с зарегистрированными инструментами (без привязки к политике сценария).
  */
 export function getGlobalRegistry(): ToolRegistry {
-  if (!globalRegistry) {
-    globalRegistry = new ToolRegistry();
-    globalGateway = new ToolGateway();
-    registerAllTools(globalRegistry, globalGateway);
-  }
-  return globalRegistry;
+  const registry = new ToolRegistry();
+  const gateway = new ToolGateway();
+  registerAllTools(registry, gateway);
+  return registry;
 }
 
 /**
@@ -67,7 +124,8 @@ export function getGlobalRegistry(): ToolRegistry {
  */
 export async function executeAgentRequest(
   userIntent: string,
-  scenarioId: string = 'web-scenario'
+  scenarioId: string = 'web-scenario',
+  options?: ExecuteAgentOptions
 ): Promise<{
   success: boolean;
   output?: string;
@@ -77,42 +135,55 @@ export async function executeAgentRequest(
   fallbackUsed?: boolean;
 }> {
   try {
-    const agentRuntime = createAgentRuntime();
-    const registry = getGlobalRegistry();
+    const tenantId = normalizeTenantId(options?.tenantId);
+    const registry = new ToolRegistry();
+    const gateway = new ToolGateway();
+    registerAllTools(registry, gateway);
+    attachOpa(gateway);
 
-    // Создание спецификации сценария с новыми инструментами
     const validator = new ScenarioSpecValidator();
     const allTools = registry.getAll();
-    const spec = validator.parse({
-      version: '0.1.0',
-      id: scenarioId,
-      name: 'Web Scenario',
-      goal: 'Process user request',
-      triggers: [
-        {
-          type: TriggerType.EVENT,
-          source: 'user.request'
-        }
-      ],
-      allowedActions: allTools.map(tool => ({
-        id: tool.id,
-        name: tool.name,
-        version: tool.version,
-        riskClass: tool.riskClass,
-        requiresApproval: tool.requiresApproval
-      })),
-      riskClass: RiskClass.LOW
-    });
+    const loaded = await tryLoadScenarioSpec(scenarioId, tenantId);
 
-    // Выполнение агента с реальными инструментами
+    let spec: ScenarioSpec;
+    if (loaded) {
+      const v = validator.validate(loaded);
+      spec = v.valid ? validator.parse(loaded) : buildFallbackSpec(scenarioId, allTools);
+    } else {
+      spec = buildFallbackSpec(scenarioId, allTools);
+    }
+
+    const builder = new ScenarioBuilder();
+    gateway.setPolicy(builder.generateExecutionPolicy(spec));
+    const availableTools = filterToolsBySpec(allTools, spec);
+
+    if (availableTools.length === 0) {
+      return {
+        success: false,
+        toolCallsExecuted: 0,
+        totalTokens: 0,
+        error: {
+          code: 'NO_TOOLS',
+          message: 'Нет инструментов, разрешённых спецификацией сценария'
+        }
+      };
+    }
+
+    const agentRuntime = new AgentRuntime(gateway, loadLlmConfigFromEnv());
+    registerDefaultAgentRole(
+      agentRuntime,
+      availableTools.map(t => t.id)
+    );
+
     const result = await agentRuntime.execute({
       scenarioId,
       executionId: `exec-${Date.now()}`,
       userId: 'web-user',
       userRoles: ['user'],
       scenarioSpec: spec,
-      availableTools: allTools,
-      userIntent
+      availableTools,
+      userIntent,
+      tenantId
     });
 
     return {

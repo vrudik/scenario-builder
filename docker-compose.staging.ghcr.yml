@@ -1,0 +1,52 @@
+# Staging из готового образа GHCR (без локальной сборки).
+# Пример:
+#   export STAGING_GHCR_IMAGE=ghcr.io/myorg/scenario-builder:latest
+#   docker compose -f docker-compose.staging.ghcr.yml pull
+#   docker compose -f docker-compose.staging.ghcr.yml up -d
+#
+# Переменные те же, что для docker-compose.staging.yml (STAGING_PORT, STAGING_DATABASE_URL, …).
+
+version: '3.8'
+
+services:
+  scenario-builder-staging:
+    image: ${STAGING_GHCR_IMAGE:?Задайте STAGING_GHCR_IMAGE, например ghcr.io/owner/repo:latest}
+    container_name: scenario-builder-staging
+    ports:
+      - "${STAGING_PORT:-3080}:3000"
+    environment:
+      NODE_ENV: production
+      SCENARIO_BUILDER_ENV: staging
+      PORT: "3000"
+      DATABASE_URL: ${STAGING_DATABASE_URL:-file:/app/data/staging.db}
+      ENABLE_EVENT_BUS: ${STAGING_ENABLE_EVENT_BUS:-false}
+      KAFKA_BROKERS: ${STAGING_KAFKA_BROKERS:-}
+      OPA_URL: ${STAGING_OPA_URL:-}
+      OPA_FAIL_OPEN: ${STAGING_OPA_FAIL_OPEN:-true}
+      USE_TEMPORAL: ${STAGING_USE_TEMPORAL:-false}
+      TEMPORAL_ADDRESS: ${STAGING_TEMPORAL_ADDRESS:-}
+    volumes:
+      - staging_app_data:/app/data
+    restart: unless-stopped
+    networks:
+      - staging_net
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3000/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 50s
+
+networks:
+  staging_net:
+    name: scenario-builder-staging-net
+
+volumes:
+  staging_app_data:
+    name: scenario_builder_staging_data

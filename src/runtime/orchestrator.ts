@@ -10,7 +10,7 @@
  * - Saga/Compensation: для длинных транзакций обязательна поддержка компенсации
  */
 
-import { WorkflowGraph, WorkflowNode, WorkflowEdge } from '../builder';
+import { WorkflowGraph, WorkflowNode, ScenarioBuilder, type DeploymentDescriptor } from '../builder';
 import { ScenarioSpec } from '../spec';
 import { ToolGateway, ToolRequest, ToolRequestContext } from '../gateway';
 import { RegisteredTool, ToolRegistry } from '../registry';
@@ -18,7 +18,26 @@ import { AgentRuntime, AgentExecutionContext } from '../agent/agent-runtime';
 import { IEventBus, BaseEvent, createEvent } from '../events';
 import { ExecutionRepository, NodeExecutionRepository } from '../db/repositories';
 import { TemporalClient } from './temporal-client';
+import type { ScenarioWorkflowStatusSnapshot } from './temporal-workflow-status';
+import {
+  toUnifiedExecutionStatus,
+  toUnifiedExecutionStatusFromDb,
+  type UnifiedExecutionStatus,
+  type ExecutionRuntimeKind
+} from './unified-execution-status';
 import type { AuditService } from '../audit/audit-service';
+import {
+  collectIncomingOutputs,
+  findNextEdges,
+  getRoutingOutputs
+} from './workflow-traversal';
+import {
+  assignExecutionLane,
+  shouldRunShadowCanaryDuplicate,
+  type DeploymentLane
+} from './canary-router';
+import type { ScenarioWorkflowOutcome } from './scenario-workflow-outcome';
+import { estimateToolCallCostUsd } from '../utils/tool-call-cost';
 
 /**
  * Контекст выполнения сценария
@@ -28,11 +47,19 @@ export interface ExecutionContext {
   executionId: string;
   workflowGraph: WorkflowGraph;
   spec: ScenarioSpec;
+  /** Multi-tenant: запись Execution в БД и согласованность со сценариями API */
+  tenantId?: string;
   userId: string;
   userRoles: string[];
   traceId: string;
   spanId: string;
   startedAt: Date;
+  /** Если не задан — вычисляется из spec через ScenarioBuilder */
+  deploymentDescriptor?: DeploymentDescriptor;
+  /** Если не задан — вычисляется по descriptor и executionId */
+  deploymentLane?: DeploymentLane;
+  /** Дубль shadow→canary: не порождать вложенные shadow-запуски */
+  isShadowRun?: boolean;
 }
 
 /**
@@ -77,6 +104,20 @@ export interface WorkflowExecutionState {
     code: string;
     message: string;
   };
+  deploymentLane?: DeploymentLane;
+  deploymentStrategy?: DeploymentDescriptor['strategy'];
+  /** Откуда исполнялся сценарий (единая модель с БД и API) */
+  runtimeKind?: ExecutionRuntimeKind;
+  temporalRunId?: string;
+  temporalTaskQueue?: string;
+  /**
+   * Temporal: workflow запущен, результат ещё не подтянут в процесс.
+   * Вызовите {@link Orchestrator.syncTemporalExecutionResult}.
+   */
+  temporalAsync?: boolean;
+  tenantId?: string;
+  /** Накопленная оценка затрат USD за execution (после tool/agent узлов) */
+  executionSpendUsd?: number;
 }
 
 /**
@@ -105,6 +146,9 @@ export class Orchestrator {
   private useTemporal: boolean = false;
   private executionStates: Map<string, WorkflowExecutionState> = new Map();
   private eventHistory: Map<string, WorkflowEvent[]> = new Map();
+  /** Контекст для маппинга результата Temporal (async или после await) */
+  private temporalLaunchContexts: Map<string, ExecutionContext> = new Map();
+  private readonly scenarioBuilder = new ScenarioBuilder();
 
   constructor(
     gateway: ToolGateway,
@@ -158,13 +202,379 @@ export class Orchestrator {
    * Запуск выполнения сценария
    */
   async startExecution(context: ExecutionContext): Promise<string> {
-    // Если Temporal доступен, используем его для durable execution
+    const ctx = this.enrichExecutionContext(context);
     if (this.useTemporal && this.temporalClient) {
-      return await this.startTemporalExecution(context);
+      return await this.startTemporalExecution(ctx);
     }
-    
-    // Иначе используем обычное выполнение (in-memory)
-    return await this.startInMemoryExecution(context);
+
+    return await this.startInMemoryExecution(ctx);
+  }
+
+  /**
+   * Подтянуть результат workflow из Temporal и обновить `executionStates` / события / аудит.
+   * Имеет смысл только если запуск был с `TEMPORAL_AWAIT_RESULT=false`.
+   */
+  async syncTemporalExecutionResult(executionId: string): Promise<ScenarioWorkflowOutcome | null> {
+    if (!this.temporalClient) {
+      return null;
+    }
+    const state = this.executionStates.get(executionId);
+    if (!state?.temporalAsync) {
+      return null;
+    }
+    const launchContext = this.temporalLaunchContexts.get(executionId);
+    if (!launchContext) {
+      return null;
+    }
+    try {
+      const outcome = await this.temporalClient.getWorkflowResult(executionId);
+      const desc = await this.temporalClient.describeScenarioWorkflow(executionId);
+      const merged: ScenarioWorkflowOutcome = {
+        ...outcome,
+        temporalRunId: desc?.runId ?? outcome.temporalRunId,
+        temporalWorkflowId: desc?.workflowId ?? outcome.temporalWorkflowId ?? executionId
+      };
+      await this.applyTemporalWorkflowOutcome(executionId, merged, launchContext);
+      this.temporalLaunchContexts.delete(executionId);
+      return merged;
+    } catch (error) {
+      console.error(`[Orchestrator] syncTemporalExecutionResult failed for ${executionId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Статус Temporal workflow по `executionId` (= workflowId), без `result()`.
+   */
+  async getTemporalWorkflowStatus(
+    executionId: string
+  ): Promise<ScenarioWorkflowStatusSnapshot | null> {
+    if (!this.temporalClient) {
+      return null;
+    }
+    return this.temporalClient.describeScenarioWorkflow(executionId);
+  }
+
+  /** JSON-история Temporal workflow (`historyToJSON`), `null` если клиента нет или workflow не найден. */
+  async getTemporalWorkflowHistoryJson(executionId: string): Promise<string | null> {
+    if (!this.temporalClient) {
+      return null;
+    }
+    return this.temporalClient.fetchScenarioWorkflowHistoryJson(executionId);
+  }
+
+  /**
+   * Единый статус для API: in-memory состояние + при Temporal — describe().
+   */
+  async getUnifiedExecutionStatus(executionId: string): Promise<UnifiedExecutionStatus | null> {
+    const state = this.executionStates.get(executionId);
+    const runtimeKind: ExecutionRuntimeKind =
+      state?.runtimeKind ?? (this.useTemporal ? 'temporal' : 'in_memory');
+
+    if (!state && runtimeKind === 'in_memory' && !this.temporalClient) {
+      return null;
+    }
+
+    let temporalDescribe: ScenarioWorkflowStatusSnapshot | null = null;
+    if (this.temporalClient && runtimeKind === 'temporal') {
+      temporalDescribe = await this.temporalClient.describeScenarioWorkflow(executionId);
+    }
+
+    const u = toUnifiedExecutionStatus(executionId, state, temporalDescribe, runtimeKind);
+    return {
+      ...u,
+      ...(state !== undefined ? { source: 'memory' as const } : {})
+    };
+  }
+
+  /**
+   * Единый статус по строке Prisma + опционально live `describe()` Temporal (после рестарта API).
+   */
+  async getUnifiedExecutionStatusFromDb(
+    executionId: string,
+    tenantId: string = 'default'
+  ): Promise<UnifiedExecutionStatus | null> {
+    if (!this.executionRepository) {
+      return null;
+    }
+    const row = await this.executionRepository.findStatusPayloadByExecutionId(executionId, tenantId);
+    if (!row) {
+      return null;
+    }
+    let live: ScenarioWorkflowStatusSnapshot | null = null;
+    if (this.temporalClient && row.runtimeKind === 'temporal') {
+      live = await this.temporalClient.describeScenarioWorkflow(executionId);
+    }
+    return toUnifiedExecutionStatusFromDb(row, live);
+  }
+
+  /**
+   * Сначала память процесса (если есть execution в кэше), иначе БД — для API после рестарта.
+   */
+  async getUnifiedExecutionStatusResolved(
+    executionId: string,
+    tenantId?: string
+  ): Promise<UnifiedExecutionStatus | null> {
+    const state = this.executionStates.get(executionId);
+    const tid = tenantId ?? state?.tenantId ?? 'default';
+    if (state) {
+      return this.getUnifiedExecutionStatus(executionId);
+    }
+    return this.getUnifiedExecutionStatusFromDb(executionId, tid);
+  }
+
+  /**
+   * Параллельный дубль на полосе canary (strategy shadow), без влияния на основной ответ.
+   * Инструменты — заглушка (`shadowToolStub`); см. `SHADOW_CANARY_ENABLED`.
+   */
+  private launchShadowCanaryDuplicateIfEligible(primary: ExecutionContext): void {
+    if (primary.isShadowRun) {
+      return;
+    }
+    const d = primary.deploymentDescriptor;
+    if (!d || !shouldRunShadowCanaryDuplicate(d, primary.executionId)) {
+      return;
+    }
+    const disabled =
+      process.env.SHADOW_CANARY_ENABLED === '0' ||
+      process.env.SHADOW_CANARY_ENABLED === 'false';
+    if (disabled) {
+      return;
+    }
+
+    const shadowId = `${primary.executionId}__shadow_canary`;
+    const shadowCtx: ExecutionContext = {
+      ...primary,
+      executionId: shadowId,
+      deploymentLane: 'canary',
+      isShadowRun: true,
+      startedAt: new Date()
+    };
+
+    void (async () => {
+      try {
+        if (this.useTemporal && this.temporalClient) {
+          await this.startTemporalShadowWorkflow(shadowCtx);
+        } else {
+          await this.startInMemoryExecution(shadowCtx);
+        }
+      } catch (e) {
+        console.warn('[Orchestrator] shadow canary duplicate failed:', e);
+      }
+    })();
+  }
+
+  private async startTemporalShadowWorkflow(context: ExecutionContext): Promise<void> {
+    if (!this.temporalClient) {
+      return;
+    }
+    const initialContextPayload = {
+      executionId: context.executionId,
+      scenarioId: context.scenarioId,
+      userId: context.userId,
+      userRoles: context.userRoles,
+      traceId: context.traceId,
+      spanId: context.spanId,
+      input: {},
+      deploymentLane: context.deploymentLane,
+      deploymentStrategy: context.deploymentDescriptor?.strategy,
+      isShadowRun: true,
+      shadowToolStub: true,
+      tenantId: context.tenantId ?? 'default'
+    };
+    await this.temporalClient.startScenarioWorkflow(
+      context.executionId,
+      context.workflowGraph,
+      context.spec,
+      initialContextPayload
+    );
+  }
+
+  private enrichExecutionContext(context: ExecutionContext): ExecutionContext {
+    const deploymentDescriptor =
+      context.deploymentDescriptor ??
+      this.scenarioBuilder.generateDeploymentDescriptor(context.spec);
+    const deploymentLane =
+      context.deploymentLane ?? assignExecutionLane(deploymentDescriptor, context.executionId);
+    if (
+      context.deploymentDescriptor === deploymentDescriptor &&
+      context.deploymentLane === deploymentLane
+    ) {
+      return context;
+    }
+    return { ...context, deploymentDescriptor, deploymentLane };
+  }
+
+  /**
+   * Паритет с in-memory: заполняем `WorkflowExecutionState` из результата Temporal workflow.
+   */
+  private mapTemporalOutcomeToExecutionState(
+    executionId: string,
+    outcome: ScenarioWorkflowOutcome,
+    context: ExecutionContext
+  ): WorkflowExecutionState {
+    const nodeResults = new Map<string, NodeExecutionResult>();
+    const completedAt = new Date();
+    const startedAt = context.startedAt;
+    if (outcome.nodeOutcomes) {
+      for (const [id, n] of Object.entries(outcome.nodeOutcomes)) {
+        nodeResults.set(id, {
+          nodeId: id,
+          state: n.ok ? NodeExecutionState.COMPLETED : NodeExecutionState.FAILED,
+          startedAt,
+          completedAt,
+          outputs: n.outputs,
+          error: n.ok ? undefined : { code: n.code ?? 'UNKNOWN', message: n.error ?? '' },
+          retryCount: 0
+        });
+      }
+    }
+    const endNode = context.workflowGraph.nodes.find(n => n.type === 'end');
+    const currentNodeId = outcome.success
+      ? (endNode?.id ?? outcome.terminalNodeId ?? 'end')
+      : (outcome.terminalNodeId ?? 'unknown');
+
+    return {
+      executionId,
+      currentNodeId,
+      nodeResults,
+      compensationStack: [],
+      completed: outcome.success,
+      failed: !outcome.success,
+      error: outcome.success
+        ? undefined
+        : {
+            code: outcome.errorCode ?? 'WORKFLOW_FAILED',
+            message: outcome.error ?? 'Workflow failed'
+          },
+      deploymentLane: context.deploymentLane,
+      deploymentStrategy: context.deploymentDescriptor?.strategy,
+      runtimeKind: 'temporal',
+      temporalRunId: outcome.temporalRunId,
+      temporalTaskQueue: 'scenario-execution',
+      tenantId: context.tenantId ?? 'default'
+    };
+  }
+
+  /** По умолчанию true; `false` — только старт workflow, результат через {@link syncTemporalExecutionResult}. */
+  private temporalAwaitWorkflowResult(): boolean {
+    return process.env.TEMPORAL_AWAIT_RESULT !== 'false';
+  }
+
+  private async persistDbAfterTemporalOutcome(
+    executionId: string,
+    executionState: WorkflowExecutionState,
+    outcome: ScenarioWorkflowOutcome
+  ): Promise<void> {
+    if (!this.executionRepository) {
+      return;
+    }
+    try {
+      const tid = executionState.tenantId ?? 'default';
+      const status = executionState.completed
+        ? 'completed'
+        : executionState.failed
+          ? 'failed'
+          : 'running';
+      await this.executionRepository.updateStatus(
+        executionId,
+        {
+          status,
+          currentNodeId: executionState.currentNodeId,
+          errorMessage: executionState.error?.message,
+          errorCode: executionState.error?.code
+        },
+        tid
+      );
+      await this.executionRepository.patchTemporalMetadata(
+        executionId,
+        {
+          temporalRunId: outcome.temporalRunId ?? executionState.temporalRunId ?? null,
+          temporalTaskQueue: executionState.temporalTaskQueue ?? 'scenario-execution',
+          temporalStatusName:
+            status === 'completed' ? 'COMPLETED' : status === 'failed' ? 'FAILED' : 'RUNNING'
+        },
+        tid
+      );
+    } catch (e) {
+      console.warn(`[Orchestrator] Failed to persist temporal execution to DB:`, e);
+    }
+  }
+
+  private async persistTemporalWorkflowStarted(
+    executionId: string,
+    runId: string,
+    tenantId: string = 'default'
+  ): Promise<void> {
+    if (!this.executionRepository) {
+      return;
+    }
+    try {
+      await this.executionRepository.updateStatus(
+        executionId,
+        {
+          status: 'running',
+          currentNodeId: 'temporal-pending'
+        },
+        tenantId
+      );
+      await this.executionRepository.patchTemporalMetadata(
+        executionId,
+        {
+          temporalRunId: runId,
+          temporalTaskQueue: 'scenario-execution',
+          temporalStatusName: 'RUNNING'
+        },
+        tenantId
+      );
+    } catch (e) {
+      console.warn(`[Orchestrator] Failed to persist temporal start to DB:`, e);
+    }
+  }
+
+  private async applyTemporalWorkflowOutcome(
+    executionId: string,
+    outcome: ScenarioWorkflowOutcome,
+    context: ExecutionContext
+  ): Promise<void> {
+    const executionState = this.mapTemporalOutcomeToExecutionState(executionId, outcome, context);
+    this.executionStates.set(executionId, executionState);
+
+    if (outcome.nodeOutcomes) {
+      const nodeIds = Object.keys(outcome.nodeOutcomes).sort();
+      for (const nodeId of nodeIds) {
+        const n = outcome.nodeOutcomes[nodeId];
+        await this.recordEvent({
+          type: n.ok ? 'node_completed' : 'node_failed',
+          executionId,
+          nodeId,
+          timestamp: new Date(),
+          data: (n.ok ? n.outputs : { error: n.error, code: n.code }) as Record<string, unknown> | undefined
+        });
+      }
+    }
+
+    if (outcome.success) {
+      void this.auditService?.logScenarioCompleted({
+        scenarioId: context.scenarioId,
+        executionId: context.executionId,
+        userId: context.userId,
+        traceId: context.traceId,
+        spanId: context.spanId,
+      });
+    } else {
+      void this.auditService?.logScenarioFailed({
+        scenarioId: context.scenarioId,
+        executionId: context.executionId,
+        userId: context.userId,
+        errorCode: outcome.errorCode,
+        errorMessage: outcome.error,
+        traceId: context.traceId,
+        spanId: context.spanId,
+      });
+    }
+
+    await this.persistDbAfterTemporalOutcome(executionId, executionState, outcome);
   }
 
   /**
@@ -172,7 +582,7 @@ export class Orchestrator {
    */
   private async startTemporalExecution(context: ExecutionContext): Promise<string> {
     const executionId = context.executionId;
-    
+
     // Сохранение выполнения в БД
     if (this.executionRepository) {
       try {
@@ -183,30 +593,53 @@ export class Orchestrator {
           userRoles: context.userRoles,
           traceId: context.traceId,
           spanId: context.spanId,
+          runtimeKind: 'temporal',
+          tenantId: context.tenantId ?? 'default'
         });
       } catch (error) {
         console.warn(`[Orchestrator] Failed to save execution to DB:`, error);
       }
     }
 
-    // Запуск workflow через Temporal
-    try {
-      await this.temporalClient!.startScenarioWorkflow(
-        executionId,
-        context.workflowGraph,
-        context.spec,
-        {
-          executionId: context.executionId,
-          scenarioId: context.scenarioId,
-          userId: context.userId,
-          userRoles: context.userRoles,
-          traceId: context.traceId,
-          spanId: context.spanId,
-          input: {},
-        }
-      );
+    const initialContextPayload = {
+      executionId: context.executionId,
+      scenarioId: context.scenarioId,
+      userId: context.userId,
+      userRoles: context.userRoles,
+      traceId: context.traceId,
+      spanId: context.spanId,
+      input: {},
+      deploymentLane: context.deploymentLane,
+      deploymentStrategy: context.deploymentDescriptor?.strategy,
+      isShadowRun: context.isShadowRun === true,
+      shadowToolStub: context.isShadowRun === true,
+      tenantId: context.tenantId ?? 'default'
+    };
 
-      // Публикация события запуска
+    try {
+      this.temporalLaunchContexts.set(executionId, context);
+      this.eventHistory.set(executionId, []);
+
+      void this.launchShadowCanaryDuplicateIfEligible(context);
+
+      await this.recordEvent({
+        type: 'trigger',
+        executionId,
+        timestamp: new Date(),
+        data: {
+          deploymentLane: context.deploymentLane,
+          deploymentStrategy: context.deploymentDescriptor?.strategy
+        }
+      });
+
+      void this.auditService?.logScenarioStarted({
+        scenarioId: context.scenarioId,
+        executionId: context.executionId,
+        userId: context.userId,
+        traceId: context.traceId,
+        spanId: context.spanId,
+      });
+
       if (this.eventBus) {
         await this.eventBus.publish(
           createEvent(
@@ -215,6 +648,8 @@ export class Orchestrator {
               executionId,
               scenarioId: context.scenarioId,
               userId: context.userId,
+              deploymentLane: context.deploymentLane,
+              deploymentStrategy: context.deploymentDescriptor?.strategy
             },
             context.executionId
           ),
@@ -222,10 +657,50 @@ export class Orchestrator {
         );
       }
 
+      if (!this.temporalAwaitWorkflowResult()) {
+        const startInfo = await this.temporalClient!.startScenarioWorkflow(
+          executionId,
+          context.workflowGraph,
+          context.spec,
+          initialContextPayload
+        );
+        await this.persistTemporalWorkflowStarted(
+          executionId,
+          startInfo.runId,
+          context.tenantId ?? 'default'
+        );
+        this.executionStates.set(executionId, {
+          executionId,
+          currentNodeId: 'temporal-pending',
+          nodeResults: new Map(),
+          compensationStack: [],
+          completed: false,
+          failed: false,
+          deploymentLane: context.deploymentLane,
+          deploymentStrategy: context.deploymentDescriptor?.strategy,
+          temporalAsync: true,
+          runtimeKind: 'temporal',
+          temporalRunId: startInfo.runId,
+          temporalTaskQueue: 'scenario-execution',
+          tenantId: context.tenantId ?? 'default'
+        });
+        return executionId;
+      }
+
+      const outcome = await this.temporalClient!.runScenarioWorkflow(
+        executionId,
+        context.workflowGraph,
+        context.spec,
+        initialContextPayload
+      );
+
+      await this.applyTemporalWorkflowOutcome(executionId, outcome, context);
+      this.temporalLaunchContexts.delete(executionId);
+
       return executionId;
     } catch (error) {
+      this.temporalLaunchContexts.delete(executionId);
       console.error(`[Orchestrator] Failed to start Temporal workflow:`, error);
-      // Fallback на in-memory выполнение
       return await this.startInMemoryExecution(context);
     }
   }
@@ -246,6 +721,8 @@ export class Orchestrator {
           userRoles: context.userRoles,
           traceId: context.traceId,
           spanId: context.spanId,
+          runtimeKind: 'in_memory',
+          tenantId: context.tenantId ?? 'default'
         });
       } catch (error) {
         console.warn(`[Orchestrator] Failed to save execution to DB:`, error);
@@ -260,7 +737,11 @@ export class Orchestrator {
       nodeResults: new Map(),
       compensationStack: [],
       completed: false,
-      failed: false
+      failed: false,
+      deploymentLane: context.deploymentLane,
+      deploymentStrategy: context.deploymentDescriptor?.strategy,
+      runtimeKind: 'in_memory',
+      tenantId: context.tenantId ?? 'default'
     };
 
     this.executionStates.set(executionId, executionState);
@@ -270,7 +751,12 @@ export class Orchestrator {
     await this.recordEvent({
       type: 'trigger',
       executionId,
-      timestamp: new Date()
+      timestamp: new Date(),
+      data: {
+        deploymentLane: context.deploymentLane,
+        deploymentStrategy: context.deploymentDescriptor?.strategy,
+        ...(context.isShadowRun ? { isShadowRun: true } : {})
+      }
     });
 
     void this.auditService?.logScenarioStarted({
@@ -280,6 +766,8 @@ export class Orchestrator {
       traceId: context.traceId,
       spanId: context.spanId,
     });
+
+    void this.launchShadowCanaryDuplicateIfEligible(context);
 
     // Начало выполнения workflow
     await this.executeWorkflow(context, executionState);
@@ -311,12 +799,34 @@ export class Orchestrator {
       const result = await this.executeNode(currentNode, context, state);
       state.nodeResults.set(currentNode.id, result);
 
+      if (this.nodeExecutionRepository) {
+        const tid = state.tenantId ?? context.tenantId ?? 'default';
+        try {
+          await this.nodeExecutionRepository.update(
+            context.executionId,
+            currentNode.id,
+            {
+              state: result.state,
+              output: result.outputs,
+              error: result.error,
+              retryCount: result.retryCount
+            },
+            tid
+          );
+        } catch (dbErr) {
+          console.warn('[Orchestrator] Failed to update node execution in DB:', dbErr);
+        }
+      }
+
       // Запись события
       await this.recordEvent({
         type: result.state === NodeExecutionState.COMPLETED ? 'node_completed' : 'node_failed',
         executionId: context.executionId,
         nodeId: currentNode.id,
-        data: result.outputs,
+        data:
+          result.state === NodeExecutionState.COMPLETED
+            ? result.outputs
+            : { error: result.error, outputs: result.outputs },
         timestamp: new Date()
       });
 
@@ -328,7 +838,13 @@ export class Orchestrator {
         }
 
         // Находим следующие переходы с учетом условий и типа узла
-        const nextEdges = this.findNextEdges(currentNode, workflowGraph, result.outputs);
+        const routingOutputs = getRoutingOutputs(
+          currentNode,
+          workflowGraph,
+          result.outputs,
+          id => state.nodeResults.get(id)?.outputs as Record<string, unknown> | undefined
+        );
+        const nextEdges = findNextEdges(currentNode, workflowGraph, routingOutputs);
 
         if (nextEdges.length === 0) {
           state.completed = true;
@@ -404,11 +920,15 @@ export class Orchestrator {
       // Обновляем статус выполнения в БД
       if (this.executionRepository) {
         try {
-          await this.executionRepository.updateStatus(context.executionId, {
-            status: 'failed',
-            errorMessage: state.error?.message,
-            errorCode: state.error?.code,
-          });
+          await this.executionRepository.updateStatus(
+            context.executionId,
+            {
+              status: 'failed',
+              errorMessage: state.error?.message,
+              errorCode: state.error?.code
+            },
+            state.tenantId ?? context.tenantId ?? 'default'
+          );
         } catch (dbError) {
           console.warn(`[Orchestrator] Failed to update execution status in DB:`, dbError);
         }
@@ -437,7 +957,8 @@ export class Orchestrator {
         await this.nodeExecutionRepository.create({
           executionId: context.executionId,
           nodeId: node.id,
-          input: this.getPreviousNodeOutputs(node.id, state),
+          input: this.getPreviousNodeOutputs(node.id, state, context.workflowGraph),
+          tenantId: state.tenantId ?? context.tenantId ?? 'default'
         });
       } catch (error) {
         console.warn(`[Orchestrator] Failed to save node execution to DB:`, error);
@@ -496,7 +1017,7 @@ export class Orchestrator {
   private async executeAction(
     node: WorkflowNode,
     context: ExecutionContext,
-    _state: WorkflowExecutionState,
+    state: WorkflowExecutionState,
     result: NodeExecutionResult
   ): Promise<NodeExecutionResult> {
     const toolId = node.toolId;
@@ -520,19 +1041,31 @@ export class Orchestrator {
 
       try {
         // Создание контекста запроса
+        const spendBefore = state.executionSpendUsd ?? 0;
         const requestContext: ToolRequestContext = {
           scenarioId: context.scenarioId,
           executionId: context.executionId,
           userId: context.userId,
           userRoles: context.userRoles,
           traceId: context.traceId,
-          spanId: context.spanId
+          spanId: context.spanId,
+          deploymentLane: context.deploymentLane,
+          shadowToolStub: context.isShadowRun === true,
+          executionSpendUsd: spendBefore > 0 ? spendBefore : undefined,
+          tenantId: state.tenantId ?? context.tenantId ?? 'default'
         };
 
-        // Создание запроса (в реальной системе здесь будет получение inputs из предыдущих узлов)
+        const fromPrevious =
+          this.getPreviousNodeOutputs(node.id, state, context.workflowGraph) ?? {};
+        const cfgInputs = node.config?.inputs;
+        const inputs: Record<string, unknown> =
+          cfgInputs && typeof cfgInputs === 'object' && !Array.isArray(cfgInputs)
+            ? { ...fromPrevious, ...(cfgInputs as Record<string, unknown>) }
+            : fromPrevious;
+
         const request: ToolRequest = {
           toolId,
-          inputs: {}, // TODO: получить из предыдущих узлов
+          inputs,
           context: requestContext
         };
 
@@ -540,6 +1073,7 @@ export class Orchestrator {
         const response = await this.gateway.execute(request, tool);
 
         if (response.success) {
+          state.executionSpendUsd = spendBefore + estimateToolCallCostUsd(tool);
           result.state = NodeExecutionState.COMPLETED;
           result.outputs = response.outputs;
           result.completedAt = new Date();
@@ -636,11 +1170,16 @@ export class Orchestrator {
           availableTools,
           userIntent: userIntent || 'Execute agent step',
           traceId: context.traceId,
-          spanId: context.spanId
+          spanId: context.spanId,
+          deploymentLane: context.deploymentLane,
+          shadowToolStub: context.isShadowRun === true,
+          executionSpendUsd: state.executionSpendUsd ?? 0,
+          tenantId: state.tenantId ?? context.tenantId ?? 'default'
         };
 
         // Выполняем агента
         const agentResult = await this.agentRuntime.execute(agentContext);
+        state.executionSpendUsd = agentContext.executionSpendUsd ?? state.executionSpendUsd ?? 0;
 
         if (agentResult.success) {
           result.state = NodeExecutionState.COMPLETED;
@@ -702,14 +1241,10 @@ export class Orchestrator {
       return (lastResultWithOutput?.outputs as Record<string, unknown>) || null;
     }
 
-    // Находим предыдущий узел через edges
-    const incomingEdge = graph.edges.find(e => e.to === currentNodeId);
-    if (!incomingEdge) {
-      return null;
-    }
-    
-    const previousNodeResult = state.nodeResults.get(incomingEdge.from);
-    return (previousNodeResult?.outputs as Record<string, unknown>) || null;
+    const merged = collectIncomingOutputs(currentNodeId, graph, from =>
+      state.nodeResults.get(from)?.outputs as Record<string, unknown> | undefined
+    );
+    return Object.keys(merged).length > 0 ? merged : null;
   }
 
   /**
@@ -736,118 +1271,6 @@ export class Orchestrator {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Поиск следующих переходов в workflow.
-   *
-   * Поведение:
-   * - decision: первый подходящий condition, иначе edge без condition
-   * - parallel: все подходящие edges
-   * - остальные узлы: первый подходящий edge
-   */
-  private findNextEdges(
-    currentNode: WorkflowNode,
-    graph: WorkflowGraph,
-    outputs?: Record<string, unknown>
-  ): WorkflowEdge[] {
-    const outgoingEdges = graph.edges.filter(edge => edge.from === currentNode.id);
-
-    if (outgoingEdges.length === 0) {
-      return [];
-    }
-
-    const conditionalEdges = outgoingEdges.filter(edge => edge.condition);
-    const defaultEdges = outgoingEdges.filter(edge => !edge.condition);
-
-    if (currentNode.type === 'decision') {
-      for (const edge of conditionalEdges) {
-        if (this.matchesCondition(edge.condition, outputs)) {
-          return [edge];
-        }
-      }
-
-      return defaultEdges.length > 0 ? [defaultEdges[0]] : [];
-    }
-
-    if (currentNode.type === 'parallel') {
-      const matchedConditional = conditionalEdges.filter(edge => this.matchesCondition(edge.condition, outputs));
-      return [...matchedConditional, ...defaultEdges];
-    }
-
-    const firstConditional = conditionalEdges.find(edge => this.matchesCondition(edge.condition, outputs));
-    if (firstConditional) {
-      return [firstConditional];
-    }
-
-    return defaultEdges.length > 0 ? [defaultEdges[0]] : [];
-  }
-
-  private matchesCondition(
-    condition: string | undefined,
-    outputs?: Record<string, unknown>
-  ): boolean {
-    if (!condition) {
-      return true;
-    }
-
-    const normalized = condition.trim();
-    if (normalized === 'true') {
-      return true;
-    }
-    if (normalized === 'false') {
-      return false;
-    }
-
-    const equalsMatch = normalized.match(/^([a-zA-Z0-9_.-]+)\s*(==|!=)\s*(.+)$/);
-    if (equalsMatch) {
-      const [, field, operator, rawExpected] = equalsMatch;
-      const actual = this.getOutputValue(outputs, field);
-      const expected = this.parseConditionValue(rawExpected.trim());
-      return operator === '==' ? actual === expected : actual !== expected;
-    }
-
-    const value = this.getOutputValue(outputs, normalized);
-    return Boolean(value);
-  }
-
-  private getOutputValue(outputs: Record<string, unknown> | undefined, path: string): unknown {
-    if (!outputs) {
-      return undefined;
-    }
-
-    return path.split('.').reduce<unknown>((current, segment) => {
-      if (current && typeof current === 'object' && segment in (current as Record<string, unknown>)) {
-        return (current as Record<string, unknown>)[segment];
-      }
-
-      return undefined;
-    }, outputs);
-  }
-
-  private parseConditionValue(value: string): unknown {
-    if (value === 'true') {
-      return true;
-    }
-
-    if (value === 'false') {
-      return false;
-    }
-
-    if (value === 'null') {
-      return null;
-    }
-
-    const numeric = Number(value);
-    if (!Number.isNaN(numeric) && value !== '') {
-      return numeric;
-    }
-
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      return value.slice(1, -1);
-    }
-
-    return value;
   }
 
   /**
@@ -893,6 +1316,23 @@ export class Orchestrator {
     const history = this.eventHistory.get(event.executionId) || [];
     history.push(event);
     this.eventHistory.set(event.executionId, history);
+
+    if (this.executionRepository) {
+      try {
+        const tenantId =
+          this.executionStates.get(event.executionId)?.tenantId ??
+          this.temporalLaunchContexts.get(event.executionId)?.tenantId ??
+          'default';
+        await this.executionRepository.addEventForPublicExecution(event.executionId, tenantId, {
+          type: event.type,
+          nodeId: event.nodeId,
+          data: event.data,
+          timestamp: event.timestamp
+        });
+      } catch (err) {
+        console.warn('[Orchestrator] Failed to persist execution event to DB:', err);
+      }
+    }
 
     // Публикуем в Event Bus, если он настроен
     if (this.eventBus && this.eventBus.isConnected()) {
@@ -940,14 +1380,17 @@ export class Orchestrator {
     context: ExecutionContext,
     eventHistory: WorkflowEvent[]
   ): Promise<void> {
-    // Восстанавливаем состояние из истории событий
+    const ctx = this.enrichExecutionContext(context);
     const state: WorkflowExecutionState = {
-      executionId: context.executionId,
+      executionId: ctx.executionId,
       currentNodeId: 'start',
       nodeResults: new Map(),
       compensationStack: [],
       completed: false,
-      failed: false
+      failed: false,
+      deploymentLane: ctx.deploymentLane,
+      deploymentStrategy: ctx.deploymentDescriptor?.strategy,
+      tenantId: ctx.tenantId ?? 'default'
     };
 
     // Восстанавливаем состояние узлов из истории
@@ -966,10 +1409,9 @@ export class Orchestrator {
       }
     }
 
-    this.executionStates.set(context.executionId, state);
-    this.eventHistory.set(context.executionId, eventHistory);
+    this.executionStates.set(ctx.executionId, state);
+    this.eventHistory.set(ctx.executionId, eventHistory);
 
-    // Продолжаем выполнение с последнего успешного узла
-    await this.executeWorkflow(context, state);
+    await this.executeWorkflow(ctx, state);
   }
 }

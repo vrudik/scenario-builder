@@ -1,6 +1,10 @@
 # Текущий статус проекта
 
-## ✅ Что уже реализовано (MVP - частично)
+_Обновлено: + multi-tenant (Scenario/Execution + админка), список executions из БД, dev-infra compose, метрики OPA/lane на gateway._
+
+Декомпозиция задач и фазы: [`docs/guides/IMPLEMENTATION_TASKS_FROM_ROADMAP.md`](docs/guides/IMPLEMENTATION_TASKS_FROM_ROADMAP.md). Подробный прогресс по модулям: [`PROGRESS.md`](PROGRESS.md). Temporal vs in-memory: [`docs/guides/TEMPORAL_VS_IN_MEMORY.md`](docs/guides/TEMPORAL_VS_IN_MEMORY.md). Инвесторский конспект: [`docs/investor/DEMO_PACKAGE.md`](docs/investor/DEMO_PACKAGE.md).
+
+## ✅ Что уже реализовано (MVP и близко к MVP)
 
 ### 1. Scenario Spec ✅
 - [x] JSON Schema/Zod схемы для валидации
@@ -8,151 +12,145 @@
 
 ### 2. Scenario Builder/Compiler ✅
 - [x] Компиляция Spec → Workflow Graph
-- [x] Генерация политик исполнения (guardrails)
-- [x] Генерация deployment descriptors (canary/shadow)
+- [x] Генерация политик исполнения (ExecutionPolicy / guardrails)
+- [x] Генерация deployment descriptors (canary/shadow / all-at-once)
 
 ### 3. Tool Registry ✅
-- [x] Регистрация инструментов (3+ инструмента: web-search, database-query, api-call)
+- [x] Регистрация инструментов (web-search, database-query, api-call)
 - [x] Метаданные: SLA, авторизация, идемпотентность, rate limits
 
 ### 4. Tool Gateway ✅
-- [x] Контроль доступа на основе политик
+- [x] Контроль доступа: **локальная ExecutionPolicy** + опционально **OPA Data API** (`scenario/allow`)
 - [x] Rate limiting и circuit breaking
 - [x] Sandbox режим
-- [x] Трассировка
+- [x] Трассировка и аудит (в т.ч. `deploymentLane` при canary)
 
-### 5. Runtime Orchestrator ✅
-- [x] Event-driven исполнение workflow
-- [x] Управление состоянием
-- [x] Retry механизмы
-- [x] Saga pattern для компенсации
+### 5. Policy Engine (OPA) ✅ (базовый контур + lane)
+- [x] Модуль `src/policy/`: `evaluateLocalToolAccess`, `OpaHttpClient`
+- [x] Rego: `policies/scenario/tool.rego` + пакет `scenario_lane` (`lane.rego`, `canaryBlockedToolIds`)
+- [x] Веб-оркестратор: `OPA_URL`, `OPA_FAIL_OPEN`, `OPA_TIMEOUT_MS`; **`gateway.setPolicy(generateExecutionPolicy(spec))`**
+- [x] PII: маскирование userId/executionId во входе OPA при medium/high (`redactOpaScenarioInput`)
+- [ ] Расширенный cost-guard в рантайме (поля для OPA — заготовка в Rego)
+
+### 6. Runtime Orchestrator ✅
+- [x] Event-driven исполнение workflow (in-memory)
+- [x] Управление состоянием, retry, saga / компенсация
 - [x] Интеграция с Agent Runtime
+- [x] Проброс **inputs** в action-узлы из предшественников (в т.ч. fan-in merge)
+- [x] Общий модуль **`workflow-traversal`** (условия на рёбрах, routing для decision/parallel)
+- [x] **Canary:** `assignExecutionLane` из DeploymentDescriptor → `ExecutionContext` / state / события / Temporal / tool context
 
-### 6. Agent Runtime ✅
-- [x] Router для выбора роли
-- [x] Tool calling цикл
-- [x] Memory (short-term + RAG)
-- [x] Guardrails (prompt injection, insecure output, excessive agency)
-- [x] Cost/token management
-- [x] Fallback механизм
+### 7. Durable Execution (Temporal) ✅ (MVP-контур)
+- [x] Workflow `scenarioWorkflow`: обход графа от `start`, action через activities, компенсации
+- [x] Activities вызывают **ToolGateway** + registry (worker)
+- [x] `npm run temporal:worker` → `tsc` + **`node dist/runtime/temporal-worker.js`** (workflow + activities из `dist/`)
+- [x] Клиент `TemporalClient`, опциональный запуск из Orchestrator при подключённом client
+- [x] Узлы **agent** в Temporal: `executeAgentNodeActivity` + `TEMPORAL_ENABLE_AGENT`
+- [x] Vitest + `@temporalio/testing`; паритет `ScenarioWorkflowOutcome` → `executionStates` после `runScenarioWorkflow`
+- [x] Идемпотентность tool/agent activity: таблица `temporal_tool_activity_result`, ключ `workflowId|runId|activityId`, env `TEMPORAL_ACTIVITY_DEDUP`; в tool — `idempotencyKey` в `ToolRequestContext`
 
-### 7. Observability ✅
-- [x] OpenTelemetry интеграция
-- [x] Трассировка (traces)
-- [x] Метрики (Prometheus)
-- [x] Структурированное логирование
-- [x] Dashboard для визуализации
+### 8. Canary deployment ✅ (первая итерация)
+- [x] Детерминированный выбор **stable / canary** по `executionId` и `canaryConfig.percentage`
+- [x] Поля в state, событиях, аудите инструментов, Temporal initial context
+- [x] Shadow-дублирование: `__shadow_canary`, `shadowToolStub`, `SHADOW_CANARY_ENABLED`
+- [x] Политики по полосе: `canaryAllowedTools`, `canaryBlockedToolIds`, **`stableBlockedToolIds`** (инструмент только на canary); OPA `lane.rego`
 
-## ❌ Что отсутствует для полного MVP (по ТЗ)
+### 9. Agent Runtime ✅
+- [x] Router, tool calling, memory, guardrails, cost/token, fallback
+- [x] Провайдер OpenAI (`LLM_PROVIDER=openai`, `OPENAI_API_KEY`); Ollama без изменений; конфиг из env для worker и `execute-orchestrator`
 
-### Критично для MVP:
+### 10. Observability ✅
+- [x] OpenTelemetry, метрики Prometheus, логирование, dashboard
+- [x] Счётчики решений OPA / отказов политики с лейблами `deployment_lane` (`gateway_opa_decisions_total`, `gateway_policy_denials_total`)
 
-1. **Event Bus (Kafka)** ✅
-   - ТЗ требует: "Event bus: базовая очередь/топик; для event streaming нужна гарантированная доставка, идемпотентность, fault-tolerance"
-   - Текущее состояние: ✅ Реализовано
-     - Event Bus абстракция и Kafka реализация
-     - Публикация событий из Orchestrator
-     - Подписка на события
-     - Идемпотентность через idempotency keys
-     - Graceful degradation (работа без Kafka)
-     - Веб-интерфейс для тестирования
+### 11. CI / качество ✅ (часть)
+- [x] GitHub Actions: Ubuntu + Windows, OPA под каждую OS; опциональный workflow с Temporal dev server + smoke-подключение
+- [x] `npm run test:opa`
+- [x] Сборка Docker-образа на Ubuntu (`docker-image` в `ci.yml`); публикация в **GHCR** при push в `main` и при тегах `v*` (`docker-publish.yml`); проверка **`docker-compose.staging.yml`** (`staging-compose` в `ci.yml`)
 
-2. **Durable Execution (Temporal)** ❌
-   - ТЗ требует: "Orchestrator: базовая логика и интеграция durable workflow. Нужно реализовать durable execution/восстановление по истории событий"
-   - Текущее состояние: Orchestrator есть, но нет интеграции с Temporal для durable execution
-   - Приоритет: **ВЫСОКИЙ** (основа orchestration-first подхода)
+### 12. Прочее из роадмапа ✅
+- [x] Event Bus (Kafka) с graceful degradation
+- [x] Template Library, Eval-кейсы и UI админки
+- [x] **Multi-tenant (часть):** `tenantId` на сценариях и executions, заголовок `X-Tenant-ID`, изоляция в API; панель тенанта в админке и `test-orchestrator.html`
+- [x] **Мониторинг run (часть):** `GET /api/executions` с лимитом и `scenarioId`, UI на `admin-runs.html`
+- [x] **Dev-infra:** `docker-compose.dev-infra.yml` (OPA, Postgres, Temporal), проверка в CI
 
-3. **Canary Deployment (реальное выполнение)** ⚠️
-   - ТЗ требует: "canary" в MVP
-   - Текущее состояние: Есть deployment descriptors, но нет реального canary deployment механизма
-   - Приоритет: **СРЕДНИЙ**
-
-### Важно для следующего этапа (Should have):
-
-4. **Template Library** ✅
-   - ТЗ требует: "Template Library: библиотека шаблонов сценариев (saga, approval, async callbacks, CRM-сценарий, antifraud и т. д.)"
-   - Текущее состояние: ✅ Реализовано
-     - Библиотека шаблонов с 5 встроенными шаблонами (saga, approval, async-callbacks, crm, antifraud)
-     - API для работы с шаблонами (list, get, search, apply)
-     - Поддержка параметризации шаблонов
-     - Категоризация и тегирование шаблонов
-     - Веб-интерфейс для просмотра и применения шаблонов (admin-templates.html)
-
-5. **Eval-кейсы** ✅
-   - ТЗ требует: "LLM eval (в т. ч. на prompt injection/безопасность)"
-   - Текущее состояние: ✅ Реализовано
-     - Библиотека eval-кейсов с 22+ тестовыми кейсами
-     - Категории: Prompt Injection, System Prompt Leakage, Jailbreak, Insecure Output, Excessive Agency, Data Leakage, Role Playing
-     - Eval Runner для запуска кейсов и проверки результатов
-     - API для работы с eval-кейсами (list, get, search, run-case, run-suite)
-     - Веб-интерфейс для просмотра и запуска eval-кейсов (admin-testing.html)
-     - Интеграция с GuardrailsManager и AgentRuntime
-     - Тесты для проверки функциональности
-
-6. **Policy Engine (OPA)** ❌
-   - ТЗ требует: "Policy Engine: централизованные политики (allow/deny, approvals, PII-маскирование, cost-guard)"
-   - Приоритет: **СРЕДНИЙ**
+---
 
 ## 📊 Соответствие MVP требованиям ТЗ
 
-**MVP по ТЗ (строка 188):**
-> Must have (MVP): Spec > compile > execute > observe; tool gateway; базовые guardrails; логи; canary.
+**MVP по ТЗ:** Spec > compile > execute > observe; tool gateway; базовые guardrails; логи; canary.
 
 | Требование | Статус | Комментарий |
 |-----------|--------|-------------|
-| Spec > compile > execute > observe | ✅ | Полностью реализовано |
-| Tool gateway | ✅ | Полностью реализовано |
-| Базовые guardrails | ✅ | Реализовано в Agent Runtime |
-| Логи | ✅ | Через OpenTelemetry |
-| Canary | ⚠️ | Есть descriptors, нет реального выполнения |
+| Spec > compile > execute > observe | ✅ | |
+| Tool gateway | ✅ | + локальная политика из spec в execute-orchestrator, + OPA опционально |
+| Базовые guardrails | ✅ | Agent Runtime |
+| Логи | ✅ | OTel + аудит |
+| Canary | ✅ | Маршрутизация и наблюдаемость; нет отдельного «второго» набора кода |
 
-**Дополнительные требования MVP (строки 64-71):**
-- ✅ Scenario Spec v0.1
-- ✅ Tool Registry v0.1 (3+ инструмента)
-- ⚠️ Orchestrator (есть, но без Temporal)
-- ✅ Event bus (Kafka) - реализовано с graceful degradation
+**Доп. блоки ТЗ:**
+- ✅ Event bus (Kafka)
 - ✅ Observability
-- ✅ Guardrails v0.1
+- ✅ Orchestrator + Temporal: agent-activity, parity статусов, worker на `node dist`
+- ✅ Policy: локально + OPA; PII/cost-guard глубже — в бэклоге
 
-## 🎯 Рекомендации по приоритетам
+---
 
-### Сейчас нужно сделать:
+## 🎯 Приоритеты: что делать дальше
 
-1. **Durable Execution (Temporal)** 🔴
-   - Критично для "orchestration-first" подхода
-   - Нужно: интеграция Orchestrator с Temporal, восстановление по истории событий
+### Ближайшие (1–2 спринта)
 
-3. **Улучшение веб-интерфейса** 🟡
-   - Создание/редактирование сценариев через UI
-   - Мониторинг выполнения в реальном времени
-   - Управление canary deployments
+1. **Temporal / DX**
+   - Уже есть: `TEMPORAL_AWAIT_RESULT`, describe/history, activity dedup. Проверить **`docker-compose.dev-infra.yml`** в вашей среде (env образа Temporal).
+   - Короткий one-pager «когда Temporal» для инвесторов (опираться на `TEMPORAL_VS_IN_MEMORY.md`).
 
-### После MVP:
+2. **Canary v2** (дальше)
+   - Сделано: allow/block по полосе, shadow, OPA lane, spec-studio.
+   - Остаётся: отдельные rate limits по полосе, **UI деплоя** на админке.
 
-4. Template Library
-5. Eval-кейсы
-6. Policy Engine (OPA)
-7. Multi-tenant поддержка
+3. **OPA v2** (базовый контур закрыт)
+   - Bundle в CI, метрики lane/result на gateway.
+   - Бэклог: числовой cost-guard в Rego; меньше дублирования локальная политика ↔ OPA.
+
+4. **Надёжность**
+   - **demo-api-smoke:** основной путь через `node` + `tsx` — при сбоях на Windows смотреть PATH/edge cases.
+
+### Средний горизонт
+
+5. **Веб-UI:** spec-редактор и трекер runs есть; **live execution** (шаги/узлы), панель canary/деплоя  
+6. **Multi-tenant:** сценарии и executions изолированы; при необходимости — очереди, шаблоны, кэш activity, политики по тенанту  
+7. **CI/CD:** GHCR + staging compose; шаблон выката — `deploy-staging.yml`, `DEPLOY_CI_GITHUB.md`, `docker-compose.staging.ghcr.yml`  
+8. **Marketplace** шаблонов и инструментов  
+
+**Сделано по контейнерам:** `Dockerfile`, `docker compose --profile app`, `CONTAINER_RUNBOOK.md`, **staging** — `docker-compose.staging.yml`, `docs/guides/STAGING.md`.  
+
+### Долгий горизонт
+
+9. Enterprise security, сертификации, федерация политик  
+10. Полная OpenAI / мульти-провайдер LLM в прод-контуре  
+
+---
 
 ## 🌐 Веб-интерфейс и точка входа
 
-- **Главная страница** (`/`): кнопки «Админский интерфейс» и «Демо сквозного теста» (и в `server.cjs`, и в `src/web/server.ts`).
-- **Два способа запуска:**
-  - `npm run web` — лёгкий сервер (`src/web/server.ts`), порт через `PORT` (по умолчанию 3000).
-  - `node server.cjs` — полный сервер с Agent Runtime, сценариями, очередями, eval, админкой.
-- **demo-e2e.html** и **test-agent.html** работают при обоих вариантах; для полного агента нужен `node server.cjs`.
-- Исправлена синтаксическая ошибка в `server.cjs` (блок `/api/queues` и закрытие callback `req.on('end')`).
+- **Главная** (`/`): админка + демо (в `server.cjs` и `src/web/server.ts`).
+- **`npm run web`** — лёгкий сервер; **`node server.cjs`** — полный (агент, очереди, eval).
+- **Temporal worker:** `temporal server start-dev`, затем `npm run temporal:worker`.
+- **OPA:** `opa run --server --addr :8181 policies/scenario/tool.rego`, переменная **`OPA_URL`**.
 
-## 📝 Чеклист недавних изменений
+---
 
-- [x] Исправление синтаксиса server.cjs (закрытие req.on, блок queues/scenarios)
-- [x] Главная страница: две кнопки (Админка + Демо) в server.cjs и server.ts
-- [x] PORT из переменной окружения в server.ts (`process.env.PORT || 3000`)
-- [x] API-заглушки для test-agent в server.ts с подсказкой «запустите node server.cjs»
-- [x] demo-e2e: поддержка в server.cjs и обработка ошибок в demo-e2e.html
+## 📝 Недавние изменения (сводка)
 
-## 📝 Текущие проблемы
+- [x] `workflow-traversal`, inputs action-узлов из графа, routing для decision/parallel  
+- [x] Temporal: workflow + activities + worker + обогащение контекста canary  
+- [x] Canary router, поля в state / событиях / gateway  
+- [x] OPA HTTP client, локальная policy, пример Rego, интеграция в gateway  
+- [x] `execute-orchestrator`: `setPolicy` из spec + `OPA_URL`  
 
-1. ✅ Исправлено: "Action node missing toolId" при выборе action-agent workflow
-2. ✅ Реализовано: Event Bus (Kafka) с graceful degradation
-3. ⚠️ Нужно: Temporal для durable execution
+## 📝 Известные ограничения
+
+1. ~~Temporal + agent~~: при `TEMPORAL_ENABLE_AGENT=1` worker поднимает Agent Runtime (Ollama); иначе agent-узлы в Temporal без LLM.  
+2. Worker в проде: `npm run temporal:worker` — сборка в `dist` + `fix-dist-esm-imports` (без tsx).  
+3. ~~demo-api-smoke~~: `node` + `tsx` CLI; на Windows учтены stdio/kill.  

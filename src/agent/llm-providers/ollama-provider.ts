@@ -107,9 +107,19 @@ export class OllamaProvider {
           content: msg.content
         });
       } else if (msg.role === 'assistant') {
+        let text = msg.content || '';
+        if (msg.toolCalls?.length) {
+          const tcJson = msg.toolCalls
+            .map(
+              (c) =>
+                `{"tool":"${c.function.name}","arguments":${c.function.arguments}}`
+            )
+            .join('\n');
+          text = text ? `${text}\n${tcJson}` : tcJson;
+        }
         ollamaMessages.push({
           role: 'assistant',
-          content: msg.content
+          content: text
         });
       } else if (msg.role === 'tool') {
         // Ollama не поддерживает tool messages напрямую, добавляем как user message

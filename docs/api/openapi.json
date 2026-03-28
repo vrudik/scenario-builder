@@ -1,0 +1,402 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Scenario Builder API",
+    "version": "1.0.0",
+    "description": "Autonomous scenario platform with quality, cost, and safety gates."
+  },
+  "servers": [
+    { "url": "/api/v1", "description": "Versioned API (canonical)" },
+    { "url": "/api", "description": "Legacy unversioned (deprecated)" }
+  ],
+  "security": [{ "BearerAuth": [] }],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key passed as Bearer token"
+      },
+      "AdminPassword": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Admin password via Basic auth or Bearer"
+      }
+    },
+    "schemas": {
+      "Scenario": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "status": { "type": "string", "enum": ["draft", "active", "paused", "archived"] },
+          "spec": { "type": "object" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Execution": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "scenarioId": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "running", "completed", "failed"] },
+          "result": { "type": "object" },
+          "startedAt": { "type": "string", "format": "date-time" },
+          "completedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Template": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "spec": { "type": "object" }
+        }
+      },
+      "Queue": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "status": { "type": "string" },
+          "itemCount": { "type": "integer" }
+        }
+      },
+      "Org": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "plan": { "type": "string" }
+        }
+      },
+      "ApiKey": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "prefix": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/scenarios": {
+      "get": {
+        "summary": "List all scenarios",
+        "tags": ["Scenarios"],
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of scenarios",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Scenario" } } } }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a scenario",
+        "tags": ["Scenarios"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Scenario" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Created scenario",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Scenario" } } }
+          }
+        }
+      }
+    },
+    "/scenarios/{id}": {
+      "get": {
+        "summary": "Get scenario by ID",
+        "tags": ["Scenarios"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Scenario details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Scenario" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "patch": {
+        "summary": "Update a scenario",
+        "tags": ["Scenarios"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Scenario" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated scenario", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Scenario" } } } }
+        }
+      },
+      "delete": {
+        "summary": "Delete a scenario",
+        "tags": ["Scenarios"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Deleted" },
+          "404": { "description": "Not found" }
+        }
+      }
+    },
+    "/executions": {
+      "get": {
+        "summary": "List executions",
+        "tags": ["Executions"],
+        "parameters": [
+          { "name": "scenarioId", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "List of executions", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Execution" } } } } }
+        }
+      }
+    },
+    "/executions/{id}": {
+      "get": {
+        "summary": "Get execution by ID",
+        "tags": ["Executions"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Execution details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Execution" } } } },
+          "404": { "description": "Not found" }
+        }
+      }
+    },
+    "/executions/{id}/diagnosis": {
+      "get": {
+        "summary": "Get execution diagnosis",
+        "tags": ["Executions"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Diagnosis report", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/templates": {
+      "get": {
+        "summary": "List templates",
+        "tags": ["Templates"],
+        "responses": {
+          "200": { "description": "List of templates", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Template" } } } } }
+        }
+      },
+      "post": {
+        "summary": "Create a template",
+        "tags": ["Templates"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Template" } } }
+        },
+        "responses": {
+          "201": { "description": "Created template", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Template" } } } }
+        }
+      }
+    },
+    "/templates/{id}": {
+      "get": {
+        "summary": "Get template by ID",
+        "tags": ["Templates"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Template details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Template" } } } },
+          "404": { "description": "Not found" }
+        }
+      }
+    },
+    "/templates/{id}/instantiate": {
+      "post": {
+        "summary": "Instantiate a template into a scenario",
+        "tags": ["Templates"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "variables": { "type": "object" } } } } }
+        },
+        "responses": {
+          "201": { "description": "Created scenario from template", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Scenario" } } } }
+        }
+      }
+    },
+    "/queues": {
+      "get": {
+        "summary": "List queues",
+        "tags": ["Queues"],
+        "responses": {
+          "200": { "description": "List of queues", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Queue" } } } } }
+        }
+      },
+      "post": {
+        "summary": "Create a queue",
+        "tags": ["Queues"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Queue" } } }
+        },
+        "responses": {
+          "201": { "description": "Created queue", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Queue" } } } }
+        }
+      }
+    },
+    "/queues/{id}": {
+      "get": {
+        "summary": "Get queue by ID",
+        "tags": ["Queues"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Queue details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Queue" } } } },
+          "404": { "description": "Not found" }
+        }
+      }
+    },
+    "/orgs": {
+      "get": {
+        "summary": "List organizations",
+        "tags": ["Organizations"],
+        "responses": {
+          "200": { "description": "List of organizations", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Org" } } } } }
+        }
+      },
+      "post": {
+        "summary": "Create an organization",
+        "tags": ["Organizations"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Org" } } }
+        },
+        "responses": {
+          "201": { "description": "Created organization", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Org" } } } }
+        }
+      }
+    },
+    "/orgs/{id}": {
+      "get": {
+        "summary": "Get organization by ID",
+        "tags": ["Organizations"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Organization details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Org" } } } },
+          "404": { "description": "Not found" }
+        }
+      },
+      "patch": {
+        "summary": "Update an organization",
+        "tags": ["Organizations"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Org" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated organization", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Org" } } } }
+        }
+      }
+    },
+    "/auth/keys": {
+      "get": {
+        "summary": "List API keys",
+        "tags": ["Auth"],
+        "responses": {
+          "200": { "description": "List of API keys", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ApiKey" } } } } }
+        }
+      },
+      "post": {
+        "summary": "Create an API key",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } } }
+        },
+        "responses": {
+          "201": { "description": "Created API key (includes full key only in this response)", "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "string" }, "key": { "type": "string" }, "name": { "type": "string" } } } } } }
+        }
+      }
+    },
+    "/auth/keys/{id}": {
+      "delete": {
+        "summary": "Revoke an API key",
+        "tags": ["Auth"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Key revoked" },
+          "404": { "description": "Key not found" }
+        }
+      }
+    },
+    "/auth/whoami": {
+      "get": {
+        "summary": "Get current authenticated identity",
+        "tags": ["Auth"],
+        "responses": {
+          "200": {
+            "description": "Current identity",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "identity": { "type": "object" }, "authMode": { "type": "string" } } } } }
+          }
+        }
+      }
+    },
+    "/audit/export": {
+      "get": {
+        "summary": "Export audit log",
+        "tags": ["Audit"],
+        "parameters": [
+          { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["json", "csv"] } },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date-time" } }
+        ],
+        "responses": {
+          "200": { "description": "Audit log export" }
+        }
+      }
+    },
+    "/onboarding/status": {
+      "get": {
+        "summary": "Get onboarding status",
+        "tags": ["Onboarding"],
+        "responses": {
+          "200": { "description": "Onboarding status", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/onboarding/complete": {
+      "post": {
+        "summary": "Mark onboarding step as complete",
+        "tags": ["Onboarding"],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "step": { "type": "string" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Step marked complete" }
+        }
+      }
+    },
+    "/usage": {
+      "get": {
+        "summary": "Get usage statistics",
+        "tags": ["Usage"],
+        "parameters": [
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date-time" } }
+        ],
+        "responses": {
+          "200": { "description": "Usage data", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    }
+  }
+}

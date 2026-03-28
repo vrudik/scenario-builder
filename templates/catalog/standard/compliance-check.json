@@ -1,0 +1,69 @@
+{
+  "version": "0.1.0",
+  "id": "tpl-compliance-check",
+  "name": "Compliance Check Pipeline",
+  "description": "KYC/AML checks with sanctions list, report generation, and human review gate",
+  "goal": "Run compliance checks on entities with full audit trail and approval gates",
+  "category": "standard",
+  "difficulty": "advanced",
+  "tags": ["compliance", "kyc", "aml", "fintech", "approval"],
+  "kpi": [
+    { "name": "check_accuracy", "target": 0.95, "unit": "percentage" },
+    { "name": "false_positive_rate", "target": 0.05, "unit": "percentage" }
+  ],
+  "triggers": [
+    { "type": "event", "source": "compliance.queue", "config": { "eventType": "entity_check_requested" } }
+  ],
+  "allowedActions": [
+    {
+      "id": "fetch-entity",
+      "name": "Fetch Entity Data",
+      "version": "1.0.0",
+      "riskClass": "moderate",
+      "requiresApproval": false
+    },
+    {
+      "id": "run-kyc-check",
+      "name": "Run KYC Check",
+      "version": "1.0.0",
+      "riskClass": "high",
+      "requiresApproval": false
+    },
+    {
+      "id": "check-sanctions-list",
+      "name": "Check Sanctions List",
+      "version": "1.0.0",
+      "riskClass": "high",
+      "requiresApproval": false,
+      "rateLimit": 20
+    },
+    {
+      "id": "generate-report",
+      "name": "Generate Compliance Report",
+      "version": "1.0.0",
+      "riskClass": "moderate",
+      "requiresApproval": false
+    },
+    {
+      "id": "submit-for-review",
+      "name": "Submit for Human Review",
+      "version": "1.0.0",
+      "riskClass": "high",
+      "requiresApproval": true
+    }
+  ],
+  "riskClass": "high",
+  "nonFunctional": {
+    "sla": { "availability": 0.999, "latency": { "p95": 30000 } },
+    "cost": { "maxPerExecution": 0.50 },
+    "tokenBudget": { "maxPerExecution": 10000 }
+  },
+  "observability": {
+    "metrics": ["execution_time", "check_accuracy", "false_positive_rate", "review_queue_depth"],
+    "alerts": [
+      { "name": "high_false_positives", "condition": "false_positive_rate > 0.10", "severity": "warning" },
+      { "name": "check_failure", "condition": "check_accuracy < 0.90", "severity": "error" }
+    ]
+  },
+  "owner": "compliance-team"
+}

@@ -1,0 +1,51 @@
+{
+  "version": "0.1.0",
+  "id": "tpl-scheduled-report",
+  "name": "Scheduled Report Generation",
+  "description": "Query data, generate LLM summary, and deliver report via email or Slack",
+  "goal": "Produce and deliver automated summary reports on a schedule",
+  "category": "standard",
+  "difficulty": "simple",
+  "tags": ["reporting", "automation", "cron"],
+  "kpi": [
+    { "name": "delivery_rate", "target": 0.99, "unit": "percentage" }
+  ],
+  "triggers": [
+    { "type": "schedule", "source": "cron", "config": { "schedule": "0 9 * * 1" } }
+  ],
+  "allowedActions": [
+    {
+      "id": "query-data",
+      "name": "Query Data Source",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "generate-summary",
+      "name": "Generate Summary",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "send-report",
+      "name": "Send Report",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false,
+      "rateLimit": 20
+    }
+  ],
+  "riskClass": "low",
+  "nonFunctional": {
+    "sla": { "availability": 0.99, "latency": { "p95": 30000 } },
+    "cost": { "maxPerExecution": 0.15 },
+    "tokenBudget": { "maxPerExecution": 5000 }
+  },
+  "observability": {
+    "metrics": ["execution_time", "delivery_rate"],
+    "alerts": [{ "name": "delivery_failure", "condition": "delivery_rate < 0.95", "severity": "error" }]
+  },
+  "owner": "platform-team"
+}

@@ -1,0 +1,59 @@
+# Инфраструктура для локального демо: OPA + PostgreSQL + Temporal (без приложения).
+# One-liner:
+#   docker compose -f docker-compose.dev-infra.yml up -d
+#
+# Переменные для приложения (server.cjs / worker):
+#   OPA_URL=http://localhost:8181
+#   USE_TEMPORAL=true
+#   TEMPORAL_ADDRESS=localhost:7233
+#
+# OPA: те же Rego, что `npm run test:opa`.
+# Temporal: gRPC 7233; Web UI часто на http://localhost:8080 (зависит от тега образа).
+
+version: '3.8'
+
+services:
+  opa:
+    image: openpolicyagent/opa:0.69.0
+    container_name: scenario-builder-opa
+    ports:
+      - '8181:8181'
+    volumes:
+      - ./policies:/policies:ro
+    command:
+      - run
+      - --server
+      - --addr
+      - :8181
+      - /policies/scenario/tool.rego
+      - /policies/scenario/lane.rego
+
+  postgresql:
+    image: postgres:13-alpine
+    container_name: scenario-builder-temporal-pg
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    ports:
+      - '5433:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U temporal']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    container_name: scenario-builder-temporal
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    ports:
+      - '7233:7233'

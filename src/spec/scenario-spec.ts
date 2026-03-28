@@ -102,6 +102,17 @@ export const RiskRulesSchema = z.object({
 });
 
 /**
+ * Явный override стратегии выката (иначе — эвристика по riskClass в ScenarioBuilder).
+ */
+export const DeploymentSpecSchema = z.object({
+  strategy: z.enum(['all-at-once', 'canary', 'shadow', 'blue-green']),
+  /** Доля canary-трафика, % (если strategy = canary) */
+  canaryPercentage: z.number().min(0).max(100).optional(),
+  /** Доля shadow-дублей, % (если strategy = shadow) */
+  shadowPercentage: z.number().min(0).max(100).optional()
+});
+
+/**
  * Схема observability
  */
 export const ObservabilitySpecSchema = z.object({
@@ -147,7 +158,26 @@ export const ScenarioSpecSchema = z.object({
   // Risk Class
   riskClass: z.nativeEnum(RiskClass).default(RiskClass.LOW),
   riskRules: RiskRulesSchema.optional(),
-  
+
+  /**
+   * Canary v2: на полосе `canary` разрешить только эти tool id (должны входить в allowedActions).
+   * Не задано — на canary те же инструменты, что и на stable.
+   */
+  canaryAllowedTools: z.array(z.string()).optional(),
+
+  /**
+   * Canary v2: на полосе `canary` запретить эти tool id (OPA scenario_lane + локальная политика).
+   */
+  canaryBlockedToolIds: z.array(z.string()).optional(),
+
+  /**
+   * Canary v2: на полосе `stable` запретить эти tool id (например, новый рискованный инструмент — только в canary).
+   */
+  stableBlockedToolIds: z.array(z.string()).optional(),
+
+  /** Override deployment descriptor; без поля — эвристика по riskClass в ScenarioBuilder */
+  deployment: DeploymentSpecSchema.optional(),
+
   // Observability
   observability: ObservabilitySpecSchema.optional(),
   
@@ -165,6 +195,7 @@ export type DataContract = z.infer<typeof DataContractSchema>;
 export type NonFunctional = z.infer<typeof NonFunctionalSchema>;
 export type RiskRules = z.infer<typeof RiskRulesSchema>;
 export type ObservabilitySpec = z.infer<typeof ObservabilitySpecSchema>;
+export type DeploymentSpec = z.infer<typeof DeploymentSpecSchema>;
 
 /**
  * Валидатор Scenario Spec

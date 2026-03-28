@@ -7,9 +7,11 @@
 import { prisma } from '../index';
 
 export interface CreateNodeExecutionInput {
+  /** Публичный executionId (поле Execution.executionId), не PK строки Execution */
   executionId: string;
   nodeId: string;
   input?: unknown;
+  tenantId?: string;
 }
 
 export interface UpdateNodeExecutionInput {
@@ -20,27 +22,58 @@ export interface UpdateNodeExecutionInput {
 }
 
 export class NodeExecutionRepository {
+  /** PK строки Execution по публичному executionId и tenant */
+  private async resolveRowId(
+    publicExecutionId: string,
+    tenantId: string = 'default'
+  ): Promise<string | null> {
+    const row = await prisma.execution.findFirst({
+      where: { executionId: publicExecutionId, tenantId },
+      select: { id: true }
+    });
+    return row?.id ?? null;
+  }
+
   /**
    * Создать выполнение узла
    */
   async create(input: CreateNodeExecutionInput) {
+    const tenantId = input.tenantId ?? 'default';
+    const rowId = await this.resolveRowId(input.executionId, tenantId);
+    if (!rowId) {
+      throw new Error(
+        `NodeExecutionRepository.create: execution row not found for executionId=${input.executionId}`
+      );
+    }
     return prisma.nodeExecution.create({
       data: {
-        executionId: input.executionId,
+        executionId: rowId,
         nodeId: input.nodeId,
         input: input.input ? JSON.stringify(input.input) : null,
-        state: 'pending',
-        startedAt: new Date(),
-      },
+        state: 'running',
+        startedAt: new Date()
+      }
     });
   }
 
   /**
    * Обновить выполнение узла
    */
-  async update(executionId: string, nodeId: string, input: UpdateNodeExecutionInput) {
-    const updateData: any = {};
-    
+  async update(
+    publicExecutionId: string,
+    nodeId: string,
+    input: UpdateNodeExecutionInput,
+    tenantId: string = 'default'
+  ) {
+    const rowId = await this.resolveRowId(publicExecutionId, tenantId);
+    if (!rowId) {
+      throw new Error(
+        `NodeExecutionRepository.update: execution row not found for executionId=${publicExecutionId}`
+      );
+    }
+
+    const updateData: Record<string, unknown> = {};
+
     if (input.state !== undefined) {
       updateData.state = input.state;
       if (input.state === 'running' && !updateData.startedAt) {
@@ -51,11 +84,11 @@ export class NodeExecutionRepository {
         const started = await prisma.nodeExecution.findUnique({
           where: {
             executionId_nodeId: {
-              executionId,
-              nodeId,
-            },
+              executionId: rowId,
+              nodeId
+            }
           },
-          select: { startedAt: true },
+          select: { startedAt: true }
         });
         if (started?.startedAt) {
           updateData.duration = new Date().getTime() - started.startedAt.getTime();
@@ -65,15 +98,15 @@ export class NodeExecutionRepository {
     if (input.output !== undefined) updateData.output = JSON.stringify(input.output);
     if (input.error !== undefined) updateData.error = JSON.stringify(input.error);
     if (input.retryCount !== undefined) updateData.retryCount = input.retryCount;
-    
+
     const updated = await prisma.nodeExecution.update({
       where: {
         executionId_nodeId: {
-          executionId,
-          nodeId,
-        },
+          executionId: rowId,
+          nodeId
+        }
       },
-      data: updateData,
+      data: updateData
     });
     
     return {
@@ -87,11 +120,18 @@ export class NodeExecutionRepository {
   /**
    * Получить выполнение узла
    */
-  async findByExecutionAndNode(executionId: string, nodeId: string) {
+  async findByExecutionAndNode(
+    publicExecutionId: string,
+    nodeId: string,
+    tenantId: string = 'default'
+  ) {
+    const rowId = await this.resolveRowId(publicExecutionId, tenantId);
+    if (!rowId) return null;
+
     const nodeExecution = await prisma.nodeExecution.findUnique({
       where: {
         executionId_nodeId: {
-          executionId,
+          executionId: rowId,
           nodeId,
         },
       },
@@ -110,12 +150,15 @@ export class NodeExecutionRepository {
   }
 
   /**
-   * Получить все выполнения узлов для execution
+   * Получить все выполнения узлов для execution (по публичному executionId)
    */
-  async findByExecutionId(executionId: string) {
+  async findByExecutionId(publicExecutionId: string, tenantId: string = 'default') {
+    const rowId = await this.resolveRowId(publicExecutionId, tenantId);
+    if (!rowId) return [];
+
     const nodeExecutions = await prisma.nodeExecution.findMany({
-      where: { executionId },
-      orderBy: { startedAt: 'asc' },
+      where: { executionId: rowId },
+      orderBy: { startedAt: 'asc' }
     });
     
     return nodeExecutions.map(n => ({

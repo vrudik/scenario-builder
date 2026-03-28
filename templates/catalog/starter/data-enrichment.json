@@ -1,0 +1,51 @@
+{
+  "version": "0.1.0",
+  "id": "tpl-data-enrichment",
+  "name": "Data Enrichment Pipeline",
+  "description": "Fetch a record, enrich with external data, and update",
+  "goal": "Enrich incomplete records with data from external APIs",
+  "category": "starter",
+  "difficulty": "medium",
+  "tags": ["data", "starter", "enrichment", "pipeline"],
+  "kpi": [
+    { "name": "enrichment_rate", "target": 0.85, "unit": "percentage" }
+  ],
+  "triggers": [
+    { "type": "event", "source": "data.records", "config": { "eventType": "record_incomplete" } }
+  ],
+  "allowedActions": [
+    {
+      "id": "fetch-record",
+      "name": "Fetch Record",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    },
+    {
+      "id": "enrich-from-api",
+      "name": "Enrich from External API",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false,
+      "rateLimit": 50
+    },
+    {
+      "id": "update-record",
+      "name": "Update Record",
+      "version": "1.0.0",
+      "riskClass": "low",
+      "requiresApproval": false
+    }
+  ],
+  "riskClass": "low",
+  "nonFunctional": {
+    "sla": { "availability": 0.99, "latency": { "p95": 8000 } },
+    "cost": { "maxPerExecution": 0.10 },
+    "tokenBudget": { "maxPerExecution": 3000 }
+  },
+  "observability": {
+    "metrics": ["execution_time", "enrichment_rate"],
+    "alerts": [{ "name": "low_enrichment", "condition": "enrichment_rate < 0.7", "severity": "warning" }]
+  },
+  "owner": "platform-team"
+}

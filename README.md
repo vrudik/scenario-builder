@@ -1,191 +1,128 @@
-# Конструктор автономных сценариев и агентных процессов
+# Scenario Builder
 
-Платформа для создания и запуска автономных сценариев на основе декларативной спецификации с автоматическими гейтами качества, стоимости и безопасности.
+> Конструктор автономных сценариев и агентных процессов
 
-## Архитектура
+Scenario Builder lets you define autonomous agent workflows as declarative specs and run them with built-in orchestration, policy gates, and observability — so every action is traceable, safe, and cost-controlled.
 
-Система построена на принципах:
-- **Spec-as-Source-of-Truth**: Декларативная спецификация как единственный источник правды
-- **Orchestration-first**: Durable execution с восстановлением по истории событий
-- **Event-driven**: Event streaming как транспорт и дисциплина
-- **Contract-driven**: Контракты между компонентами
+## Key Capabilities
 
-## Компоненты
+- **Spec-as-code** — declarative scenario specs (Zod/JSON Schema) with risk classes, SLA, cost budgets, allowed actions
+- **Orchestration** — durable execution via Temporal or lightweight in-memory runtime
+- **Agent Runtime** — LLM tool calling with memory, guardrails, and cost management
+- **Policy Gates** — OPA integration, rate limiting, circuit breaking, PII masking
+- **Audit Trail** — every agent action logged with full context, exportable for compliance
+- **Observability** — OpenTelemetry tracing and metrics (Jaeger, Prometheus)
+- **Multi-tenant** — tenant-aware API, policy isolation, execution isolation
+- **Event-driven** — Kafka event streaming between components
 
-1. **Scenario Spec** - декларативная спецификация сценариев (JSON Schema)
-2. **Scenario Builder/Compiler** - компиляция Spec → workflow graph → артефакты
-3. **Tool Registry + Tool Gateway** - регистрация инструментов и контроль доступа
-4. **Runtime** - event-driven исполнение с durable orchestration
-5. **Agent Runtime** - tool calling + память (short-term + RAG)
-6. **Observability** - трассировка и мониторинг (OpenTelemetry)
-
-## Технологический стек
-
-- **Orchestration**: Temporal (durable execution)
-- **Event Streaming**: Apache Kafka
-- **Tool Calling**: OpenAI Function Calling API
-- **Memory**: RAG (Retrieval-Augmented Generation)
-- **Observability**: OpenTelemetry
-- **Policy Engine**: OPA (Open Policy Agent)
-
-## Структура проекта
+## Architecture
 
 ```
-.
-├── src/
-│   ├── spec/              # Scenario Spec схемы и валидаторы
-│   ├── builder/           # Scenario Builder/Compiler
-│   ├── agent/             # Agent Runtime (router, tool calling, memory, guardrails)
-│   ├── registry/          # Tool Registry
-│   ├── gateway/           # Tool Gateway
-│   ├── runtime/           # Runtime исполнение (в разработке)
-│   ├── agent/            # Agent Runtime (в разработке)
-│   ├── observability/     # Observability компоненты (в разработке)
-│   └── policies/         # Политики безопасности (в разработке)
-├── examples/              # Примеры использования
-└── tests/                # Тесты и eval-кейсы
+Scenario Spec (Zod/JSON) → Builder (graph + policy) → Orchestrator (Temporal / in-memory)
+                                                          ↓
+                                                    Tool Gateway (OPA, rate limit, circuit break)
+                                                          ↓
+                                                    Agent Runtime (LLM, tools, memory, guardrails)
+                                                          ↓
+                                                    Audit + Observability (OpenTelemetry)
 ```
 
-## Реализованные компоненты
-
-### ✅ Scenario Spec
-- Декларативная спецификация сценариев на основе Zod схем
-- Валидация спецификаций
-- Поддержка триггеров, инструментов, риск-классов, SLA
-
-### ✅ Scenario Builder/Compiler
-- Компиляция Spec → Workflow Graph
-- Генерация политик исполнения (guardrails)
-- Генерация deployment descriptors
-
-### ✅ Tool Registry
-- Регистрация и управление инструментами
-- Хранение метаданных (SLA, авторизация, идемпотентность)
-- Поиск и фильтрация инструментов
-
-### ✅ Tool Gateway
-- Контроль доступа на основе политик
-- Rate limiting и circuit breaking
-- Sandbox режим для тестирования
-- Логирование и трассировка
-
-### ✅ Runtime Orchestrator
-- Event-driven исполнение сценариев
-- Durable execution с восстановлением после сбоев
-- Retry механизмы с экспоненциальным backoff
-- Saga pattern для компенсации транзакций
-- Интеграция с Temporal (базовая структура)
-
-## В разработке
-
-- Agent Runtime (tool calling + память)
-- Observability (OpenTelemetry интеграция)
-- CI/CD pipeline
-
-## Быстрый старт
+## Quick Start
 
 ```bash
-# Установка зависимостей
 npm install
-
-# Запуск локальной разработки
-npm run dev
-
-# Веб-интерфейс (лёгкий сервер, порт по умолчанию 3000)
-npm run web
-
-# Полный сервер с Agent Runtime, сценариями, очередями, админкой
-node server.cjs
-
-# Запуск примера
-npm run example
-
-# Запуск тестов
-npm test
-```
-
-Порт для `npm run web` задаётся переменной окружения: `PORT=3001 npm run web` (Linux/macOS) или `$env:PORT=3001; npm run web` (PowerShell). Если порт 3000 занят, освободите его или задайте другой PORT.
-
-
-## Режимы запуска (единая точка входа для Phase 0)
-
-Для демонстраций и разработки используйте один из двух режимов:
-
-1. **Demo/light mode** (быстрый старт UI + заглушки API):
-   ```bash
-   npm run web
-   ```
-
-2. **Full mode** (полный сервер с Agent Runtime/очередями/API):
-   ```bash
-   node server.cjs
-   ```
-
-Рекомендуемый baseline-check после `npm install`:
-
-```bash
 npm run typecheck
-npm run build
 npm test -- --run
 ```
 
-Минимальные переменные окружения добавлены в `.env.example` (скопируйте в `.env` и при необходимости настройте значения).
-
-Healthchecks:
-- `GET /healthz` (`/api/health`) — liveness
-- `GET /readyz` (`/api/ready`) — readiness
-
-Контейнерный runbook: `docs/guides/CONTAINER_RUNBOOK.md`.
-
-## Демо сквозного теста с предзаполненными данными
-
-Этот проект включает отдельный интерфейс для быстрого smoke/e2e прогона с фиксированным тестовым payload.
+### Light mode (UI + demo APIs)
 
 ```bash
-npm install
 npm run web
+# Open http://localhost:3000
 ```
 
-После запуска откройте:
-- `http://localhost:3000` — главная страница (кнопки «Админский интерфейс» и «Демо сквозного теста»)
-- `http://localhost:3000/demo-e2e.html` — экран демо сквозного теста
-- `http://localhost:3000/about-trust.html` — экран доверия (guardrails, audit trail, observability)
-- `http://localhost:3000/test-agent.html` — тест Agent Runtime (для полного агента запускайте `node server.cjs`)
+### Full mode (Agent Runtime + DB + admin APIs)
 
-Порядок проверки:
-1. Нажмите **«1. Проверить предзаполненные данные»**.
-2. Убедитесь, что отобразился сценарий `demo-order-support` и входные поля `customerId/orderId/message`.
-3. Нажмите **«2. Запустить сквозной тест»**.
-4. Убедитесь, что итоговый статус — `PASSED`, а в результате есть шаги выполнения.
-5. Для отчёта встречи используйте экспорт: `GET /api/demo-e2e/export?format=json` или `GET /api/demo-e2e/export?format=pdf-lite`.
+```bash
+node server.cjs
+# Open http://localhost:3000/admin-dashboard.html
+```
 
-## Пример использования
+### Optional: Temporal + OPA
+
+See [Quick Start Guide](docs/guides/QUICK_START.md) for Temporal, OPA, and Kafka setup.
+
+## Project Structure
+
+```
+src/
+├── spec/              # Scenario Spec (Zod schemas, validation)
+├── builder/           # Spec → workflow graph → execution policy
+├── registry/          # Tool Registry
+├── gateway/           # Tool Gateway (OPA, rate limit, circuit break)
+├── runtime/           # Orchestrator, Temporal workflow/worker/activities
+├── agent/             # Agent Runtime (LLM, tool calling, memory, guardrails)
+├── web/               # HTTP server, REST APIs
+├── observability/     # OpenTelemetry metrics + tracing
+├── policy/            # Local policy + OPA client
+├── eval/              # Eval runner / test cases
+├── audit/             # Audit types + repository
+├── events/            # Event bus (Kafka)
+├── tools/             # Built-in tools
+├── db/                # Prisma repositories
+└── index.ts           # Library barrel exports
+```
+
+Admin UI: `admin-*.html` pages at project root. Demo: `demo-e2e.html`. Trust: `about-trust.html`.
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Language | TypeScript, Node.js 20+ |
+| Orchestration | Temporal / in-memory |
+| Event Streaming | Apache Kafka |
+| Policy Engine | OPA (Open Policy Agent) |
+| Database | SQLite (Prisma ORM), PostgreSQL-ready |
+| LLM | OpenAI Function Calling, Ollama |
+| Observability | OpenTelemetry → Jaeger, Prometheus |
+| CI/CD | GitHub Actions, Docker, GHCR |
+
+## Usage Example
 
 ```typescript
-import { ScenarioSpecValidator, ScenarioBuilder } from './src';
-import { ToolRegistry } from './src/registry';
-import { ToolGateway } from './src/gateway';
+import { ScenarioSpecValidator, ScenarioBuilder } from 'scenario-builder';
+import { ToolRegistry } from 'scenario-builder/registry';
+import { ToolGateway } from 'scenario-builder/gateway';
 
-// Загрузка и валидация спецификации
 const validator = new ScenarioSpecValidator();
 const spec = validator.parse(specJson);
 
-// Компиляция в workflow graph
 const builder = new ScenarioBuilder();
-const workflowGraph = builder.compile(spec);
+const graph = builder.compile(spec);
 const policy = builder.generateExecutionPolicy(spec);
 
-// Регистрация инструментов
 const registry = new ToolRegistry();
 registry.register(tool);
 
-// Настройка gateway
 const gateway = new ToolGateway();
 gateway.setPolicy(policy);
 ```
 
-См. `examples/usage.ts` для полного примера.
+See `examples/` for full working examples.
 
-## Лицензия
+## Documentation
+
+| Document | Description |
+|----------|------------|
+| [Quick Start](docs/guides/QUICK_START.md) | Setup guide with Temporal, OPA, Kafka |
+| [Web Instructions](docs/guides/WEB_INSTRUCTIONS.md) | Admin UI and API reference |
+| [API Documentation](docs/api/API_DOCUMENTATION.md) | REST API endpoints |
+| [Container Runbook](docs/guides/CONTAINER_RUNBOOK.md) | Docker deployment |
+| [Staging Guide](docs/guides/STAGING.md) | Staging environment setup |
+| [Product Identity](docs/product/PRODUCT_IDENTITY.md) | Product positioning and ICP |
+
+## License
 
 MIT

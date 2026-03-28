@@ -28,6 +28,22 @@ export interface ExecutionPolicy {
     maxPerExecution?: number;
     maxPerDay?: number;
   };
+  /** Из spec.dataContract — для OPA и внешних политик */
+  scenarioPiiClassification?: 'none' | 'low' | 'medium' | 'high';
+  /** Из spec.riskClass */
+  scenarioRiskClass?: string;
+  /**
+   * Из spec.canaryAllowedTools: на полосе canary только эти id (иначе без доп. фильтра).
+   */
+  canaryAllowedTools?: string[];
+  /**
+   * Из spec.canaryBlockedToolIds: на полосе canary эти id запрещены.
+   */
+  canaryBlockedToolIds?: string[];
+  /**
+   * Из spec.stableBlockedToolIds: на полосе stable эти id запрещены (доступны на canary, если не заблокированы там).
+   */
+  stableBlockedToolIds?: string[];
 }
 
 /**
@@ -192,7 +208,12 @@ export class ScenarioBuilder {
       requiresApproval,
       rateLimits,
       costLimits: spec.nonFunctional?.cost || {},
-      tokenLimits: spec.nonFunctional?.tokenBudget || {}
+      tokenLimits: spec.nonFunctional?.tokenBudget || {},
+      scenarioPiiClassification: spec.dataContract?.piiClassification,
+      scenarioRiskClass: spec.riskClass,
+      canaryAllowedTools: spec.canaryAllowedTools,
+      canaryBlockedToolIds: spec.canaryBlockedToolIds,
+      stableBlockedToolIds: spec.stableBlockedToolIds
     };
   }
 
@@ -200,7 +221,53 @@ export class ScenarioBuilder {
    * Генерация deployment descriptor
    */
   generateDeploymentDescriptor(spec: ScenarioSpec): DeploymentDescriptor {
-    // По умолчанию используем canary для высокорисковых сценариев
+    const dep = spec.deployment;
+    const clampPct = (n: number | undefined, fallback: number): number => {
+      const v = n ?? fallback;
+      return Math.min(100, Math.max(0, v));
+    };
+
+    if (dep?.strategy === 'shadow') {
+      return {
+        strategy: 'shadow',
+        shadowConfig: {
+          enabled: true,
+          percentage: clampPct(dep.shadowPercentage, 10)
+        }
+      };
+    }
+    if (dep?.strategy === 'canary') {
+      return {
+        strategy: 'canary',
+        canaryConfig: {
+          percentage: clampPct(dep.canaryPercentage, 10),
+          duration: 3600,
+          successCriteria: {
+            errorRate: 0.01,
+            latency: 1000
+          }
+        }
+      };
+    }
+    if (dep?.strategy === 'all-at-once') {
+      return { strategy: 'all-at-once' };
+    }
+    if (dep?.strategy === 'blue-green') {
+      return { strategy: 'blue-green' };
+    }
+
+    // Средний риск: stable для пользователя + shadow-дубль на canary (доля в shadowConfig)
+    if (spec.riskClass === 'medium') {
+      return {
+        strategy: 'shadow',
+        shadowConfig: {
+          enabled: true,
+          percentage: 10
+        }
+      };
+    }
+
+    // Высокорисковые: классический canary по доле трафика
     if (spec.riskClass === 'high' || spec.riskClass === 'critical') {
       return {
         strategy: 'canary',
