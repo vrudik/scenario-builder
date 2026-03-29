@@ -50,6 +50,23 @@ Thumbs.db
 temp-*.json
 *.tmp
 
+# Local caches, notebooks, and ML/tooling (machine / worktree noise)
+.cache/
+.cursor/
+.docker/
+.ipython/
+.jupyter/
+.matplotlib/
+.ollama/
+.streamlit/
+
+# Accidental nested clone at repo root (e.g. second checkout inside worktree)
+/scenario-builder/
+
+# Ad-hoc local binaries and pitch decks (remove *.pptx line if you version slides)
+opa-test.exe
+*.pptx
+
 # Windows system files
 NTUSER.DAT*
 ntuser.ini
