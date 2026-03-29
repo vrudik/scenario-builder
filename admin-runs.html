@@ -117,6 +117,22 @@
         .evt-timeline li.evt-fail::before { background: #dc2626; }
         .evt-timeline li.evt-run::before { background: #2563eb; }
         .evt-meta { color: var(--text-secondary); font-size: 0.75rem; }
+        .node-timeline { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+        .node-tl-row {
+            display: grid;
+            grid-template-columns: 120px 1fr;
+            gap: 12px;
+            align-items: start;
+            font-size: 0.8125rem;
+        }
+        .node-tl-meta { color: var(--text-secondary); font-size: 0.75rem; line-height: 1.35; }
+        .node-tl-bar-wrap { background: #e2e8f0; border-radius: 6px; height: 8px; overflow: hidden; margin-top: 4px; }
+        .node-tl-bar { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #3b82f6, #6366f1); min-width: 4px; }
+        .node-tl-bar.fail { background: linear-gradient(90deg, #ef4444, #b91c1c); }
+        .node-tl-bar.pending { background: #94a3b8; }
+        .unified-tl-wrap { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+        .evt-timeline-merge li.merge-node::before { background: #7c3aed; }
+        .evt-timeline-merge li.merge-event::before { background: #64748b; }
     </style>
 </head>
 <body>
@@ -137,6 +153,10 @@
                 <a href="/admin-queues.html" class="nav-link"><span>🔄</span><span>Queues</span></a>
                 <a href="/admin-templates.html" class="nav-link"><span>📚</span><span>Templates</span></a>
                 <a href="/admin-config.html" class="nav-link"><span>⚙️</span><span>Configuration</span></a>
+                <a href="/admin-onboarding.html" class="nav-link"><span>🚀</span><span>Onboarding</span></a>
+                <a href="/admin-usage.html" class="nav-link"><span>📉</span><span>Usage</span></a>
+                <a href="/admin-quota.html" class="nav-link"><span>🪪</span><span>Quotas</span></a>
+                <a href="/admin-deployment.html" class="nav-link"><span>🚦</span><span>Deploy</span></a>
             </div>
             <div class="nav-status">
                 <span class="status-indicator"></span>
@@ -225,6 +245,10 @@
                 Узлы пишутся в <code>NodeExecution</code> при запуске с БД. События — из <code>ExecutionEvent</code>: оркестратор сохраняет <code>trigger</code>, <code>node_completed</code>, <code>node_failed</code>, <code>compensation</code> при наличии репозитория БД.
                 Обновляется вместе с «Единый статус» (авто 2 с / 5 с) и при включённом «доп. опрос 1,5 с» — чаще только панели live без повторного тяжёлого unified-status. При включённом <strong>WebSocket</strong> сервер шлёт снимки по каналу <code>/ws/admin-runs</code> (интервалы как у авто / 1,5 с при fast).
             </p>
+            <div class="unified-tl-wrap">
+                <div class="recent-label">Единый таймлайн (узлы + события по времени)</div>
+                <div id="unifiedTimelineHost"><p class="db-recent-empty">Запросите единый статус по execution ID.</p></div>
+            </div>
             <div class="live-grid">
                 <div>
                     <div class="recent-label">Узлы workflow</div>
@@ -281,6 +305,7 @@
         const liveFastPoll = document.getElementById('liveFastPoll');
         const nodeStepsHost = document.getElementById('nodeStepsHost');
         const eventTimelineHost = document.getElementById('eventTimelineHost');
+        const unifiedTimelineHost = document.getElementById('unifiedTimelineHost');
         const livePanelsHint = document.getElementById('livePanelsHint');
         const useWsStreamEl = document.getElementById('useWsStream');
         /** @type {WebSocket | null} */
@@ -585,16 +610,15 @@
                     status: msg.events.status,
                     data: msg.events.data
                 };
+                let execPayload = null;
+                let eventsArr = [];
                 if (fullR.ok && fullR.data && fullR.data.success && fullR.data.execution) {
-                    renderNodeSteps(fullR.data.execution);
-                } else {
-                    renderNodeSteps(null);
+                    execPayload = fullR.data.execution;
                 }
                 if (evR.ok && evR.data && evR.data.success && Array.isArray(evR.data.events)) {
-                    renderEventTimeline(evR.data.events);
-                } else {
-                    renderEventTimeline([]);
+                    eventsArr = evR.data.events;
                 }
+                renderAllLivePanels(execPayload, eventsArr);
                 if (livePanelsHint) {
                     const bits = [];
                     bits.push(fullR.ok ? 'снимок execution (WS)' : 'execution: HTTP ' + fullR.status);
@@ -630,13 +654,51 @@
                 nodeStepsHost.innerHTML = '<p class="db-recent-empty">Нет строк NodeExecution для этого run (старые данные или run без записи узлов в БД).</p>';
                 return;
             }
-            const rows = nodes.map((n) => {
+            const sorted = nodes.slice().sort((a, b) => {
+                const ta = a.startedAt ? new Date(a.startedAt).getTime() : 0;
+                const tb = b.startedAt ? new Date(b.startedAt).getTime() : 0;
+                if (ta !== tb) return ta - tb;
+                return String(a.nodeId || '').localeCompare(String(b.nodeId || ''));
+            });
+            let maxDur = 0;
+            sorted.forEach((n) => {
+                const d = typeof n.duration === 'number' && n.duration > 0 ? n.duration : 0;
+                if (d > maxDur) maxDur = d;
+            });
+            if (maxDur <= 0) maxDur = 1;
+            const timeline = sorted.map((n) => {
+                const st = (n.state || '').replace(/</g, '');
+                const nid = (n.nodeId || '').replace(/</g, '');
+                const dur = n.duration != null ? n.duration + ' ms' : '—';
+                const started = n.startedAt ? fmtShort(n.startedAt) : '—';
+                const ended = n.completedAt ? fmtShort(n.completedAt) : '—';
+                const dnum = typeof n.duration === 'number' && n.duration > 0 ? n.duration : 0;
+                const pct = Math.min(100, Math.round((dnum / maxDur) * 100));
+                let barCls = '';
+                if (st === 'failed' || st === 'compensated') barCls = ' fail';
+                else if (st === 'pending' || st === 'running') barCls = ' pending';
+                return (
+                    '<div class="node-tl-row">' +
+                    '<div class="node-tl-meta"><strong>' + nid + '</strong><br>' + st + '<br>' + dur + '</div>' +
+                    '<div><div class="node-tl-meta">' + started + ' → ' + ended + '</div>' +
+                    '<div class="node-tl-bar-wrap"><div class="node-tl-bar' + barCls + '" style="width:' + pct + '%"></div></div></div>' +
+                    '</div>'
+                );
+            }).join('');
+            const rows = sorted.map((n) => {
                 const dur = n.duration != null ? n.duration + ' ms' : '—';
                 const st = (n.state || '').replace(/</g, '');
                 const nid = (n.nodeId || '').replace(/</g, '');
-                return '<tr><td>' + nid + '</td><td>' + st + '</td><td>' + dur + '</td></tr>';
+                const started = n.startedAt ? fmtShort(n.startedAt) : '—';
+                const ended = n.completedAt ? fmtShort(n.completedAt) : '—';
+                return '<tr><td>' + nid + '</td><td>' + st + '</td><td>' + dur + '</td><td>' + started + '</td><td>' + ended + '</td></tr>';
             }).join('');
-            nodeStepsHost.innerHTML = '<table class="node-steps-table"><thead><tr><th>nodeId</th><th>state</th><th>duration</th></tr></thead><tbody>' + rows + '</tbody></table>';
+            nodeStepsHost.innerHTML =
+                '<p class="hint" style="margin-bottom:8px;">Таймлайн узлов (по <code>NodeExecution</code> из БД)</p>' +
+                '<div class="node-timeline">' + timeline + '</div>' +
+                '<table class="node-steps-table" style="margin-top:16px;"><thead><tr><th>nodeId</th><th>state</th><th>duration</th><th>started</th><th>completed</th></tr></thead><tbody>' +
+                rows +
+                '</tbody></table>';
         }
 
         function renderEventTimeline(events) {
@@ -658,6 +720,72 @@
             eventTimelineHost.innerHTML = '<ul class="evt-timeline">' + items + '</ul>';
         }
 
+        function renderUnifiedTimeline(execution, events) {
+            if (!unifiedTimelineHost) return;
+            const nodes = (execution && execution.nodeExecutions) || [];
+            const evList = Array.isArray(events) ? events : [];
+            const items = [];
+            nodes.forEach((n) => {
+                const tRaw = n.startedAt || n.completedAt;
+                const t = tRaw ? new Date(tRaw).getTime() : 0;
+                const st = (n.state || '').replace(/</g, '');
+                const nid = (n.nodeId || '').replace(/</g, '');
+                let mood = 'evt-run';
+                if (st === 'failed' || st === 'compensated') mood = 'evt-fail';
+                else if (st === 'completed' || st === 'succeeded') mood = 'evt-ok';
+                const dur = n.duration != null ? n.duration + ' ms' : '';
+                items.push({
+                    t: t || 0,
+                    cls: 'merge-node ' + mood,
+                    html:
+                        '<strong>Узел</strong> · ' +
+                        nid +
+                        ' · ' +
+                        st +
+                        '<div class="evt-meta">' +
+                        (n.startedAt ? fmtShort(n.startedAt) : '—') +
+                        (dur ? ' · ' + dur : '') +
+                        '</div>',
+                });
+            });
+            evList.forEach((e) => {
+                const t = e.timestamp ? new Date(e.timestamp).getTime() : 0;
+                const typ = (e.type || '').replace(/</g, '');
+                const nid = e.nodeId ? String(e.nodeId).replace(/</g, '') : '';
+                let mood = 'evt-run';
+                if (typ.indexOf('failed') >= 0 || typ === 'compensation') mood = 'evt-fail';
+                else if (typ.indexOf('completed') >= 0 || typ === 'trigger') mood = 'evt-ok';
+                items.push({
+                    t: t || 0,
+                    cls: 'merge-event ' + mood,
+                    html:
+                        '<strong>Событие</strong> · ' +
+                        typ +
+                        (nid ? ' · ' + nid : '') +
+                        '<div class="evt-meta">' +
+                        fmtShort(e.timestamp) +
+                        '</div>',
+                });
+            });
+            if (!items.length) {
+                unifiedTimelineHost.innerHTML =
+                    '<p class="db-recent-empty">Нет узлов и событий для объединённого таймлайна.</p>';
+                return;
+            }
+            items.sort((a, b) => {
+                if (a.t !== b.t) return a.t - b.t;
+                return 0;
+            });
+            const lis = items.map((it) => '<li class="' + it.cls + '">' + it.html + '</li>').join('');
+            unifiedTimelineHost.innerHTML = '<ul class="evt-timeline evt-timeline-merge">' + lis + '</ul>';
+        }
+
+        function renderAllLivePanels(execution, eventsArr) {
+            renderNodeSteps(execution);
+            renderEventTimeline(eventsArr);
+            renderUnifiedTimeline(execution, eventsArr);
+        }
+
         async function refreshLivePanels(fromAutoPoll) {
             const id = getId();
             if (!id || !nodeStepsHost || !eventTimelineHost) return;
@@ -670,16 +798,15 @@
                 apiGetExecution(id, ''),
                 apiGetExecution(id, '/events')
             ]);
+            let execPayload = null;
+            let eventsArr = [];
             if (fullR.ok && fullR.data && fullR.data.success && fullR.data.execution) {
-                renderNodeSteps(fullR.data.execution);
-            } else {
-                renderNodeSteps(null);
+                execPayload = fullR.data.execution;
             }
             if (evR.ok && evR.data && evR.data.success && Array.isArray(evR.data.events)) {
-                renderEventTimeline(evR.data.events);
-            } else {
-                renderEventTimeline([]);
+                eventsArr = evR.data.events;
             }
+            renderAllLivePanels(execPayload, eventsArr);
             if (livePanelsHint) {
                 const bits = [];
                 bits.push(fullR.ok ? 'снимок execution' : 'execution: HTTP ' + fullR.status);

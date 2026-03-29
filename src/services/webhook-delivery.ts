@@ -45,6 +45,7 @@ export async function deliverWebhook(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'User-Agent': 'Scenario-Builder-Webhook/1',
           'X-Webhook-Id': webhookId,
           'X-Webhook-Signature': `sha256=${signature}`,
           'X-Webhook-Timestamp': timestamp,
@@ -68,6 +69,9 @@ export async function deliverWebhook(
     }
   }
 
+  console.warn(
+    `[webhook] delivery failed after ${retries + 1} attempt(s): ${event.type} → ${endpoint.url}`,
+  );
   return false;
 }
 

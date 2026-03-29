@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quotas — Scenario Builder</title>
+  <link rel="stylesheet" href="/admin-styles.css">
+  <style>
+    .quota-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 14px; }
+    .quota-toolbar .field { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
+    .quota-err { display: none; padding: 10px 12px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; font-size: 0.875rem; margin-bottom: 12px; }
+    .quota-err.visible { display: block; }
+    .quota-table-wrap { overflow-x: auto; margin-top: 8px; }
+    .quota-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+    .quota-table th, .quota-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border, #e2e8f0); }
+    .quota-table tbody tr:hover { background: #f8fafc; }
+    .quota-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .btn-small { font-size: 0.75rem; padding: 4px 10px; }
+    .form-grid { display: grid; gap: 12px; max-width: 520px; margin-top: 8px; }
+    .muted { color: var(--text-secondary); font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <nav class="top-nav">
+    <div class="nav-container">
+      <div class="nav-brand"><span>⚙️</span><span>Scenario Builder Admin</span></div>
+      <div class="nav-links">
+        <a href="/admin-dashboard.html" class="nav-link"><span>📊</span><span>Overview</span></a>
+        <a href="/admin-usage.html" class="nav-link"><span>📉</span><span>Usage</span></a>
+        <a href="/admin-quota.html" class="nav-link active"><span>🪪</span><span>Quotas</span></a>
+        <a href="/admin-webhooks.html" class="nav-link"><span>🔗</span><span>Webhooks</span></a>
+      </div>
+      <div class="nav-status"><span class="status-indicator"></span><span>Quotas</span></div>
+    </div>
+  </nav>
+  <div class="main-container">
+    <div class="page-header">
+      <h1 class="page-title">Quota configuration</h1>
+      <p class="page-subtitle">List, create/update (upsert), and delete per-org limits. Requires <code>org:read</code> / <code>org:write</code>.</p>
+    </div>
+    <section class="section-card">
+      <div id="quotaErr" class="quota-err" role="alert"></div>
+      <div class="quota-toolbar">
+        <div class="field">
+          <label for="orgSelect">Organization</label>
+          <select id="orgSelect" class="config-input"></select>
+        </div>
+        <button type="button" class="btn-primary" id="btnLoad">Reload</button>
+        <a href="/admin-usage.html" class="action-btn secondary" style="text-decoration:none;display:inline-flex;align-items:center;">Open usage dashboard</a>
+      </div>
+      <p class="muted">DELETE uses <code>?id=</code> (quota row id). Upsert key is <code>orgId + metric + period</code>.</p>
+      <div id="tableHost" class="quota-table-wrap"></div>
+    </section>
+    <section class="section-card">
+      <h2 class="section-title">Upsert quota</h2>
+      <input type="hidden" id="editingId" value="">
+      <div class="form-grid">
+        <div>
+          <label class="config-label" for="metric">metric</label>
+          <input type="text" id="metric" class="config-input" placeholder="executions" />
+        </div>
+        <div>
+          <label class="config-label" for="limitVal">limit</label>
+          <input type="number" id="limitVal" class="config-input" min="0" value="1000" />
+        </div>
+        <div>
+          <label class="config-label" for="period">period</label>
+          <select id="period" class="config-input">
+            <option value="monthly">monthly</option>
+            <option value="daily">daily</option>
+          </select>
+        </div>
+        <div>
+          <label class="config-label" for="action">action</label>
+          <select id="action" class="config-input">
+            <option value="warn">warn</option>
+            <option value="block">block</option>
+            <option value="throttle">throttle</option>
+          </select>
+        </div>
+        <div>
+          <button type="button" class="btn-primary" id="btnSave">Save (upsert)</button>
+          <button type="button" class="action-btn secondary" id="btnClearForm" style="margin-left:8px;">Clear form</button>
+        </div>
+        <div id="saveOut" class="muted"></div>
+      </div>
+    </section>
+  </div>
+  <script src="/admin-common.js"></script>
+  <script>
+    function orgId() {
+      var sel = document.getElementById('orgSelect');
+      return (sel && sel.value) || 'default';
+    }
+    function showErr(msg) {
+      var el = document.getElementById('quotaErr');
+      if (!msg) {
+        el.className = 'quota-err';
+        el.textContent = '';
+        return;
+      }
+      el.className = 'quota-err visible';
+      el.textContent = msg;
+    }
+    async function loadOrgs() {
+      var sel = document.getElementById('orgSelect');
+      sel.innerHTML = '';
+      try {
+        var r = await fetch('/api/orgs', withTenantHeaders());
+        var data = await r.json();
+        var rows = Array.isArray(data) ? data : [];
+        if (!rows.length) {
+          var o = document.createElement('option');
+          o.value = 'default';
+          o.textContent = 'default';
+          sel.appendChild(o);
+          return;
+        }
+        rows.forEach(function (org) {
+          var opt = document.createElement('option');
+          opt.value = org.id;
+          opt.textContent = org.name + ' (' + org.slug + ')';
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        var o2 = document.createElement('option');
+        o2.value = 'default';
+        o2.textContent = 'default (orgs failed)';
+        sel.appendChild(o2);
+      }
+    }
+    function clearForm() {
+      document.getElementById('editingId').value = '';
+      document.getElementById('metric').value = '';
+      document.getElementById('limitVal').value = '1000';
+      document.getElementById('period').value = 'monthly';
+      document.getElementById('action').value = 'warn';
+      document.getElementById('saveOut').textContent = '';
+    }
+    function fillForm(row) {
+      document.getElementById('editingId').value = row.id || '';
+      document.getElementById('metric').value = row.metric || '';
+      document.getElementById('limitVal').value = row.limitVal != null ? row.limitVal : 0;
+      document.getElementById('period').value = row.period || 'monthly';
+      document.getElementById('action').value = row.action || 'warn';
+      document.getElementById('saveOut').textContent = 'Editing row id ' + (row.id || '') + ' (save still upserts by metric+period).';
+    }
+    async function loadList() {
+      showErr('');
+      var host = document.getElementById('tableHost');
+      host.innerHTML = '<p class="muted">Loading…</p>';
+      try {
+        var r = await fetch('/api/quotas?orgId=' + encodeURIComponent(orgId()), withTenantHeaders());
+        var j = await r.json();
+        if (!r.ok) {
+          showErr('HTTP ' + r.status + ' — ' + (j && j.error ? j.error : JSON.stringify(j)));
+          host.innerHTML = '';
+          return;
+        }
+        if (!Array.isArray(j) || !j.length) {
+          host.innerHTML = '<p class="muted">No quota rows for this org.</p>';
+          return;
+        }
+        var rows = j
+          .map(function (row) {
+            return (
+              '<tr data-id="' +
+              String(row.id).replace(/"/g, '') +
+              '">' +
+              '<td>' +
+              String(row.metric).replace(/</g, '') +
+              '</td>' +
+              '<td>' +
+              String(row.period).replace(/</g, '') +
+              '</td>' +
+              '<td>' +
+              row.limitVal +
+              '</td>' +
+              '<td>' +
+              String(row.action).replace(/</g, '') +
+              '</td>' +
+              '<td class="quota-actions">' +
+              '<button type="button" class="action-btn secondary btn-small btn-edit">Edit</button> ' +
+              '<button type="button" class="action-btn secondary btn-small btn-del">Delete</button>' +
+              '</td></tr>'
+            );
+          })
+          .join('');
+        host.innerHTML =
+          '<table class="quota-table"><thead><tr><th>Metric</th><th>Period</th><th>Limit</th><th>Action</th><th></th></tr></thead><tbody>' +
+          rows +
+          '</tbody></table>';
+        host.querySelectorAll('.btn-edit').forEach(function (btn, idx) {
+          btn.addEventListener('click', function () {
+            fillForm(j[idx]);
+          });
+        });
+        host.querySelectorAll('.btn-del').forEach(function (btn, idx) {
+          btn.addEventListener('click', async function () {
+            if (!confirm('Delete this quota row?')) return;
+            var id = j[idx].id;
+            try {
+              var dr = await fetch('/api/quotas?id=' + encodeURIComponent(id), withTenantHeaders({ method: 'DELETE' }));
+              var dt = await dr.text();
+              document.getElementById('saveOut').textContent = dr.status + ' ' + dt;
+              loadList();
+              clearForm();
+            } catch (e) {
+              showErr(String(e));
+            }
+          });
+        });
+      } catch (e) {
+        host.innerHTML = '';
+        showErr(String(e));
+      }
+    }
+    document.getElementById('btnLoad').onclick = loadList;
+    document.getElementById('btnClearForm').onclick = clearForm;
+    document.getElementById('btnSave').onclick = async function () {
+      var out = document.getElementById('saveOut');
+      showErr('');
+      out.textContent = 'Saving…';
+      try {
+        var body = {
+          orgId: orgId(),
+          metric: document.getElementById('metric').value.trim(),
+          limitVal: Number(document.getElementById('limitVal').value),
+          period: document.getElementById('period').value,
+          action: document.getElementById('action').value,
+        };
+        if (!body.metric) {
+          out.textContent = 'metric required';
+          return;
+        }
+        var r = await fetch(
+          '/api/quotas',
+          withTenantHeaders({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        );
+        var t = await r.text();
+        out.textContent = r.status + ' ' + t;
+        if (!r.ok) showErr('Save failed: HTTP ' + r.status);
+        loadList();
+      } catch (e) {
+        out.textContent = String(e);
+        showErr(String(e));
+      }
+    };
+    document.getElementById('orgSelect').addEventListener('change', loadList);
+    loadOrgs().then(loadList);
+  </script>
+</body>
+</html>

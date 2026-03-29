@@ -1,6 +1,7 @@
 // Общие функции для всех админ-страниц
 
 var ADMIN_TENANT_LS_KEY = 'scenarioBuilder.tenantId';
+var ADMIN_API_BEARER_LS_KEY = 'scenarioBuilder.apiBearer';
 var ADMIN_TENANT_RE = /^[a-zA-Z0-9._-]{1,64}$/;
 
 /** Текущий тенант для X-Tenant-ID (синхронизируется с server.cjs / scenarios-api). */
@@ -39,11 +40,37 @@ function setTenantId(value) {
     return t;
 }
 
-/** Добавляет заголовок X-Tenant-ID (сценарии, выполнения, orchestrator). */
+/** Опциональный Bearer для AUTH_MODE=required (полный ключ или уже с префиксом Bearer). */
+function getApiBearerToken() {
+    try {
+        var t = localStorage.getItem(ADMIN_API_BEARER_LS_KEY);
+        t = t != null ? String(t).trim() : '';
+        return t;
+    } catch (_) {
+        return '';
+    }
+}
+
+function setApiBearerToken(value) {
+    try {
+        var t = String(value || '').trim();
+        if (!t) {
+            localStorage.removeItem(ADMIN_API_BEARER_LS_KEY);
+        } else {
+            localStorage.setItem(ADMIN_API_BEARER_LS_KEY, t);
+        }
+    } catch (_) {}
+}
+
+/** Добавляет X-Tenant-ID и при необходимости Authorization (API key / admin password). */
 function withTenantHeaders(init) {
     init = init || {};
     var headers = new Headers(init.headers || {});
     headers.set('X-Tenant-ID', getTenantId());
+    var bearer = getApiBearerToken();
+    if (bearer && !headers.has('Authorization')) {
+        headers.set('Authorization', bearer.indexOf('Bearer ') === 0 ? bearer : 'Bearer ' + bearer);
+    }
     var out = {};
     for (var k in init) {
         if (init.hasOwnProperty(k) && k !== 'headers') {
@@ -123,6 +150,25 @@ function setActiveNavLink() {
             link.classList.remove('active');
         }
     });
+}
+
+/**
+ * Fetch wrapper that adds X-Tenant-ID and Authorization headers automatically.
+ * Use for all /api/* calls in admin pages.
+ */
+function apiFetch(url, options) {
+    options = options || {};
+    var init = withTenantHeaders(options);
+    var headers = init.headers instanceof Headers ? init.headers : new Headers(init.headers || {});
+    var authToken = (typeof window !== 'undefined' && window.__sbAuthToken) || null;
+    if (!authToken) {
+        try { authToken = localStorage.getItem('sb_auth_token'); } catch (_) {}
+    }
+    if (authToken) {
+        headers.set('Authorization', 'Bearer ' + authToken);
+    }
+    init.headers = headers;
+    return fetch(url, init);
 }
 
 // Инициализация при загрузке

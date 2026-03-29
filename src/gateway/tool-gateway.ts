@@ -15,6 +15,8 @@ import { evaluateLocalToolAccess } from '../policy/local-tool-policy';
 import type { OpaHttpClient } from '../policy/opa-http-client';
 import { redactOpaScenarioInput } from './opa-input-pii';
 import { systemMetrics } from '../observability/metrics';
+import type { MockToolConfig } from '../tools/mock-tool-runtime';
+import { executeMockTool } from '../tools/mock-tool-runtime';
 
 function prometheusDeploymentLane(lane?: string): 'stable' | 'canary' | 'unset' {
   if (lane === 'stable' || lane === 'canary') {
@@ -52,6 +54,8 @@ export interface ToolRequestContext {
   orgId?: string;
   /** Deployment environment (e.g. 'production', 'staging', 'development') */
   environment?: string;
+  /** When set and contains this tool id, gateway returns stub from mockToolConfig before the real executor */
+  mockToolConfig?: MockToolConfig;
 }
 
 /**
@@ -312,6 +316,41 @@ export class ToolGateway {
           traceId: request.context.traceId,
           spanId: request.context.spanId
         }
+      };
+    }
+
+    const mockCfg = request.context.mockToolConfig;
+    if (mockCfg && typeof mockCfg === 'object' && mockCfg[request.toolId]) {
+      const mockResult = await executeMockTool(request.toolId, request.inputs, mockCfg);
+      const out = mockResult.output;
+      const outputs: Record<string, unknown> =
+        out !== null && typeof out === 'object' && !Array.isArray(out)
+          ? { ...(out as Record<string, unknown>) }
+          : { value: out as unknown };
+      void this.auditService?.logToolCall({
+        action: 'tool_call_completed',
+        toolId: request.toolId,
+        executionId: request.context.executionId,
+        scenarioId: request.context.scenarioId,
+        userId: request.context.userId,
+        outcome: 'success',
+        message: 'Mock tool response',
+        traceId: request.context.traceId,
+        spanId: request.context.spanId,
+        details: {
+          mocked: true,
+          ...(request.context.deploymentLane ? { deploymentLane: request.context.deploymentLane } : {}),
+        },
+      });
+      return {
+        success: true,
+        outputs,
+        metadata: {
+          latency: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+          traceId: request.context.traceId,
+          spanId: request.context.spanId,
+        },
       };
     }
 

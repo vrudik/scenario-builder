@@ -10,8 +10,32 @@ export interface QuotaCheckResult {
   remaining: number | null;
 }
 
-export async function checkQuota(orgId: string, metric: string): Promise<QuotaCheckResult> {
+/**
+ * Resolve billing org id from workspace.tenantId, else default org by slug.
+ */
+export async function resolveOrgIdForTenant(tenantId: string): Promise<string> {
+  try {
+    const ws = await prisma.workspace.findUnique({
+      where: { tenantId },
+      select: { orgId: true },
+    });
+    if (ws?.orgId) return ws.orgId;
+    const def = await prisma.org.findUnique({
+      where: { slug: 'default' },
+      select: { id: true },
+    });
+    return def?.id ?? 'default';
+  } catch {
+    return 'default';
+  }
+}
+
+/**
+ * Check quota for a workspace tenant: resolves org from Workspace row, then reads UsageRecord for that org+tenant.
+ */
+export async function checkQuota(tenantId: string, metric: string): Promise<QuotaCheckResult> {
   const period = currentPeriod();
+  const orgId = await resolveOrgIdForTenant(tenantId);
 
   const quota = await prisma.quotaConfig.findUnique({
     where: { orgId_metric_period: { orgId, metric, period: 'monthly' } },
@@ -22,7 +46,7 @@ export async function checkQuota(orgId: string, metric: string): Promise<QuotaCh
   }
 
   const usage = await prisma.usageRecord.findUnique({
-    where: { orgId_tenantId_period_metric: { orgId, tenantId: 'default', period, metric } },
+    where: { orgId_tenantId_period_metric: { orgId, tenantId, period, metric } },
   });
 
   const current = usage?.value ?? 0;

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Webhooks — Scenario Builder</title>
+  <link rel="stylesheet" href="/admin-styles.css">
+  <style>
+    .wh-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 14px; }
+    .wh-toolbar .field { display: flex; flex-direction: column; gap: 4px; min-width: 200px; }
+    .wh-err { display: none; padding: 10px 12px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; font-size: 0.875rem; margin-bottom: 12px; }
+    .wh-err.visible { display: block; }
+    .wh-ok { display: none; padding: 10px 12px; border-radius: 8px; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; font-size: 0.875rem; margin-bottom: 12px; word-break: break-all; }
+    .wh-ok.visible { display: block; }
+    .wh-table-wrap { overflow-x: auto; }
+    .wh-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+    .wh-table th, .wh-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border, #e2e8f0); vertical-align: top; }
+    .wh-table tbody tr:hover { background: #f8fafc; }
+    .wh-muted { color: var(--text-secondary); font-size: 0.875rem; }
+    .wh-form { display: grid; gap: 12px; max-width: 560px; margin-top: 8px; }
+    code { font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <nav class="top-nav">
+    <div class="nav-container">
+      <div class="nav-brand"><span>⚙️</span><span>Scenario Builder Admin</span></div>
+      <div class="nav-links">
+        <a href="/admin-dashboard.html" class="nav-link"><span>📊</span><span>Overview</span></a>
+        <a href="/admin-quota.html" class="nav-link"><span>🪪</span><span>Quotas</span></a>
+        <a href="/admin-webhooks.html" class="nav-link active"><span>🔗</span><span>Webhooks</span></a>
+        <a href="/docs/contracts/WEBHOOK_DELIVERY.md" class="nav-link" target="_blank" rel="noopener"><span>📄</span><span>Contract</span></a>
+      </div>
+      <div class="nav-status"><span class="status-indicator"></span><span>Webhooks</span></div>
+    </div>
+  </nav>
+  <div class="main-container">
+    <div class="page-header">
+      <h1 class="page-title">Webhook endpoints</h1>
+      <p class="page-subtitle">Register HTTPS URLs for outbound POSTs. Requires <code>config:read</code> / <code>config:write</code>. Delivery contract: <code>docs/contracts/WEBHOOK_DELIVERY.md</code>.</p>
+    </div>
+    <div id="whErr" class="wh-err" role="alert"></div>
+    <div id="whOk" class="wh-ok" role="status"></div>
+    <section class="section-card">
+      <div class="wh-toolbar">
+        <div class="field">
+          <label for="orgSelect">Organization</label>
+          <select id="orgSelect" class="config-input"></select>
+        </div>
+        <button type="button" class="btn-primary" id="btnLoad">Reload</button>
+      </div>
+      <div id="tableHost" class="wh-table-wrap"></div>
+    </section>
+    <section class="section-card">
+      <h2 class="section-title">Create endpoint</h2>
+      <p class="wh-muted">Events: comma-separated types, or <code>*</code> for all. Secret is shown only once after create — store it for signature verification.</p>
+      <div class="wh-form">
+        <div>
+          <label class="config-label" for="newUrl">URL</label>
+          <input type="url" id="newUrl" class="config-input" placeholder="https://example.com/hooks/sb" />
+        </div>
+        <div>
+          <label class="config-label" for="newEvents">Events</label>
+          <input type="text" id="newEvents" class="config-input" value="*" />
+        </div>
+        <div>
+          <button type="button" class="btn-primary" id="btnCreate">Create</button>
+          <span id="createOut" class="wh-muted" style="margin-left:10px;"></span>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script src="/admin-common.js"></script>
+  <script>
+    function orgId() {
+      var sel = document.getElementById('orgSelect');
+      return (sel && sel.value) || 'default';
+    }
+    function showErr(msg) {
+      var el = document.getElementById('whErr');
+      document.getElementById('whOk').className = 'wh-ok';
+      document.getElementById('whOk').textContent = '';
+      if (!msg) {
+        el.className = 'wh-err';
+        el.textContent = '';
+        return;
+      }
+      el.className = 'wh-err visible';
+      el.textContent = msg;
+    }
+    function showOk(msg) {
+      showErr('');
+      var el = document.getElementById('whOk');
+      el.className = 'wh-ok visible';
+      el.textContent = msg;
+    }
+    function parseEvents(raw) {
+      var s = String(raw || '').trim();
+      if (s === '*') return ['*'];
+      return s
+        .split(',')
+        .map(function (x) {
+          return x.trim();
+        })
+        .filter(Boolean);
+    }
+    function formatEvents(cell) {
+      try {
+        var a = JSON.parse(cell);
+        return Array.isArray(a) ? a.join(', ') : cell;
+      } catch (_) {
+        return cell;
+      }
+    }
+    async function loadOrgs() {
+      var sel = document.getElementById('orgSelect');
+      sel.innerHTML = '';
+      try {
+        var r = await fetch('/api/orgs', withTenantHeaders());
+        var data = await r.json();
+        var rows = Array.isArray(data) ? data : [];
+        if (!rows.length) {
+          var o = document.createElement('option');
+          o.value = 'default';
+          o.textContent = 'default';
+          sel.appendChild(o);
+          return;
+        }
+        rows.forEach(function (org) {
+          var opt = document.createElement('option');
+          opt.value = org.id;
+          opt.textContent = org.name + ' (' + org.slug + ')';
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        var o2 = document.createElement('option');
+        o2.value = 'default';
+        o2.textContent = 'default';
+        sel.appendChild(o2);
+      }
+    }
+    async function loadList() {
+      showErr('');
+      var host = document.getElementById('tableHost');
+      host.innerHTML = '<p class="wh-muted">Loading…</p>';
+      try {
+        var r = await fetch('/api/webhooks?orgId=' + encodeURIComponent(orgId()), withTenantHeaders());
+        var j = await r.json();
+        if (!r.ok) {
+          showErr('HTTP ' + r.status + ' — ' + (j && j.error ? j.error : JSON.stringify(j)));
+          host.innerHTML = '';
+          return;
+        }
+        if (!Array.isArray(j) || !j.length) {
+          host.innerHTML = '<p class="wh-muted">No webhooks for this org.</p>';
+          return;
+        }
+        var html = j
+          .map(function (row) {
+            var ev = formatEvents(row.events);
+            var act = row.active ? 'yes' : 'no';
+            return (
+              '<tr data-id="' +
+              String(row.id).replace(/"/g, '') +
+              '">' +
+              '<td style="max-width:220px;word-break:break-all;">' +
+              String(row.url).replace(/</g, '') +
+              '</td>' +
+              '<td>' +
+              String(ev).replace(/</g, '') +
+              '</td>' +
+              '<td>' +
+              act +
+              '</td>' +
+              '<td><button type="button" class="action-btn secondary btn-small wh-test">Test</button> ' +
+              '<button type="button" class="action-btn secondary btn-small wh-toggle">Toggle active</button> ' +
+              '<button type="button" class="action-btn secondary btn-small wh-del">Delete</button></td></tr>'
+            );
+          })
+          .join('');
+        host.innerHTML =
+          '<table class="wh-table"><thead><tr><th>URL</th><th>Events</th><th>Active</th><th></th></tr></thead><tbody>' +
+          html +
+          '</tbody></table>';
+        host.querySelectorAll('tr[data-id]').forEach(function (tr) {
+          var id = tr.getAttribute('data-id');
+          var row = j.filter(function (x) {
+            return x.id === id;
+          })[0];
+          tr.querySelector('.wh-test').addEventListener('click', async function () {
+            try {
+              var t = await fetch('/api/webhooks/' + encodeURIComponent(id) + '/test', withTenantHeaders({ method: 'POST' }));
+              var body = await t.text();
+              showOk('Test HTTP ' + t.status + ' — ' + body);
+            } catch (e) {
+              showErr(String(e));
+            }
+          });
+          tr.querySelector('.wh-toggle').addEventListener('click', async function () {
+            try {
+              var t = await fetch('/api/webhooks/' + encodeURIComponent(id), withTenantHeaders({
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ active: !row.active }),
+              }));
+              var body = await t.text();
+              if (!t.ok) showErr(body);
+              loadList();
+            } catch (e) {
+              showErr(String(e));
+            }
+          });
+          tr.querySelector('.wh-del').addEventListener('click', async function () {
+            if (!confirm('Delete this webhook?')) return;
+            try {
+              var t = await fetch('/api/webhooks/' + encodeURIComponent(id), withTenantHeaders({ method: 'DELETE' }));
+              await t.text();
+              loadList();
+            } catch (e) {
+              showErr(String(e));
+            }
+          });
+        });
+      } catch (e) {
+        host.innerHTML = '';
+        showErr(String(e));
+      }
+    }
+    document.getElementById('btnLoad').onclick = loadList;
+    document.getElementById('orgSelect').addEventListener('change', loadList);
+    document.getElementById('btnCreate').onclick = async function () {
+      var out = document.getElementById('createOut');
+      showErr('');
+      out.textContent = 'Creating…';
+      try {
+        var body = {
+          orgId: orgId(),
+          url: document.getElementById('newUrl').value.trim(),
+          events: parseEvents(document.getElementById('newEvents').value),
+        };
+        if (!body.url) {
+          out.textContent = 'URL required';
+          return;
+        }
+        var r = await fetch('/api/webhooks', withTenantHeaders({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }));
+        var res = await r.json();
+        out.textContent = r.status + ' created';
+        if (r.ok && res.secret) {
+          showOk('Save this secret now (shown once): ' + res.secret);
+        } else if (!r.ok) {
+          showErr(JSON.stringify(res));
+        }
+        document.getElementById('newUrl').value = '';
+        loadList();
+      } catch (e) {
+        out.textContent = '';
+        showErr(String(e));
+      }
+    };
+    loadOrgs().then(loadList);
+  </script>
+</body>
+</html>

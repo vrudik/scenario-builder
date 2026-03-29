@@ -10,6 +10,9 @@
 
 import { readFileSync } from 'node:fs';
 import { createApiKey, listApiKeys, revokeApiKey } from './auth.js';
+import { AuditRepository } from '../audit/audit-repository.js';
+import { AuditService } from '../audit/audit-service.js';
+import { AuditAction } from '../audit/audit-types.js';
 
 // Redirect all console output to stderr so stdout stays clean JSON
 console.log = (...args: unknown[]) =>
@@ -23,6 +26,9 @@ console.info = (...args: unknown[]) =>
 
 const log = (...args: unknown[]) =>
   process.stderr.write(args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ') + '\n');
+
+const auditRepo = new AuditRepository();
+const auditService = new AuditService(auditRepo);
 
 async function main() {
   const command = process.argv[2];
@@ -55,6 +61,13 @@ async function main() {
         env: (params.env as 'live' | 'test') ?? 'live',
         orgId: params.orgId as string | undefined,
       });
+      auditService.logAuthEvent({
+        action: AuditAction.API_KEY_CREATED,
+        actor: String(params.createdBy || 'api'),
+        details: { keyId: (result as Record<string, unknown>).id, name: String(params.name || 'Unnamed key') },
+        tenantId: params.tenantId as string | undefined,
+        orgId: params.orgId as string | undefined,
+      }).catch(() => {});
       break;
     }
 
@@ -67,6 +80,11 @@ async function main() {
       if (!params.id) throw new Error('id required');
       const ok = await revokeApiKey(String(params.id));
       result = { ok };
+      auditService.logAuthEvent({
+        action: AuditAction.API_KEY_REVOKED,
+        actor: 'system',
+        details: { keyId: String(params.id) },
+      }).catch(() => {});
       break;
     }
 

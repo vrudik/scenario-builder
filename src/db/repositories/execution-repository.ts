@@ -98,7 +98,7 @@ export class ExecutionRepository {
         events: {
           orderBy: { timestamp: 'asc' }
         },
-        nodeExecutions: true,
+        nodeExecutions: { orderBy: [{ startedAt: 'asc' }, { nodeId: 'asc' }] },
         compensations: true
       }
     });

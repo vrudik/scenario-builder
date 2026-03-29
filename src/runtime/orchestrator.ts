@@ -38,6 +38,9 @@ import {
 } from './canary-router';
 import type { ScenarioWorkflowOutcome } from './scenario-workflow-outcome';
 import { estimateToolCallCostUsd } from '../utils/tool-call-cost';
+import { dispatchWebhooks } from './webhook-dispatch';
+import { getUsageMeter } from '../services/usage-meter.js';
+import { resolveOrgIdForTenant } from '../services/quota-enforcer.js';
 
 /**
  * Контекст выполнения сценария
@@ -49,6 +52,8 @@ export interface ExecutionContext {
   spec: ScenarioSpec;
   /** Multi-tenant: запись Execution в БД и согласованность со сценариями API */
   tenantId?: string;
+  /** Billing / usage: если не задан — вычисляется из tenantId через Workspace */
+  orgId?: string;
   userId: string;
   userRoles: string[];
   traceId: string;
@@ -202,7 +207,16 @@ export class Orchestrator {
    * Запуск выполнения сценария
    */
   async startExecution(context: ExecutionContext): Promise<string> {
-    const ctx = this.enrichExecutionContext(context);
+    const enriched = this.enrichExecutionContext(context);
+    const tid = enriched.tenantId ?? 'default';
+    const orgId = enriched.orgId ?? (await resolveOrgIdForTenant(tid));
+    const ctx: ExecutionContext = { ...enriched, orgId };
+    try {
+      getUsageMeter().track(orgId, tid, 'executions', 1);
+    } catch (_) {
+      /* best-effort */
+    }
+
     if (this.useTemporal && this.temporalClient) {
       return await this.startTemporalExecution(ctx);
     }
@@ -562,6 +576,19 @@ export class Orchestrator {
         traceId: context.traceId,
         spanId: context.spanId,
       });
+      const durationMs = Date.now() - context.startedAt.getTime();
+      const nodesCompleted = outcome.nodeOutcomes
+        ? Object.values(outcome.nodeOutcomes).filter(n => n.ok).length
+        : undefined;
+      void dispatchWebhooks('execution.completed', {
+        executionId: context.executionId,
+        scenarioId: context.scenarioId,
+        status: 'completed',
+        tenantId: context.tenantId ?? 'default',
+        duration: durationMs,
+        cost: executionState.executionSpendUsd,
+        nodesCompleted,
+      });
     } else {
       void this.auditService?.logScenarioFailed({
         scenarioId: context.scenarioId,
@@ -571,6 +598,13 @@ export class Orchestrator {
         errorMessage: outcome.error,
         traceId: context.traceId,
         spanId: context.spanId,
+      });
+      void dispatchWebhooks('execution.failed', {
+        executionId: context.executionId,
+        scenarioId: context.scenarioId,
+        error: outcome.error ?? 'Workflow failed',
+        tenantId: context.tenantId ?? 'default',
+        failedNode: outcome.terminalNodeId,
       });
     }
 
@@ -638,6 +672,12 @@ export class Orchestrator {
         userId: context.userId,
         traceId: context.traceId,
         spanId: context.spanId,
+      });
+
+      void dispatchWebhooks('execution.started', {
+        executionId: context.executionId,
+        scenarioId: context.scenarioId,
+        tenantId: context.tenantId ?? 'default',
       });
 
       if (this.eventBus) {
@@ -767,6 +807,12 @@ export class Orchestrator {
       spanId: context.spanId,
     });
 
+    void dispatchWebhooks('execution.started', {
+      executionId: context.executionId,
+      scenarioId: context.scenarioId,
+      tenantId: context.tenantId ?? 'default',
+    });
+
     void this.launchShadowCanaryDuplicateIfEligible(context);
 
     // Начало выполнения workflow
@@ -855,6 +901,19 @@ export class Orchestrator {
             traceId: context.traceId,
             spanId: context.spanId,
           });
+          const durationMs = Date.now() - context.startedAt.getTime();
+          const nodesCompleted = [...state.nodeResults.values()].filter(
+            r => r.state === NodeExecutionState.COMPLETED,
+          ).length;
+          void dispatchWebhooks('execution.completed', {
+            executionId: context.executionId,
+            scenarioId: context.scenarioId,
+            status: 'completed',
+            tenantId: context.tenantId ?? 'default',
+            duration: durationMs,
+            cost: state.executionSpendUsd,
+            nodesCompleted,
+          });
           return;
         }
 
@@ -867,6 +926,19 @@ export class Orchestrator {
             userId: context.userId,
             traceId: context.traceId,
             spanId: context.spanId,
+          });
+          const durationMsEnd = Date.now() - context.startedAt.getTime();
+          const nodesCompletedEnd = [...state.nodeResults.values()].filter(
+            r => r.state === NodeExecutionState.COMPLETED,
+          ).length;
+          void dispatchWebhooks('execution.completed', {
+            executionId: context.executionId,
+            scenarioId: context.scenarioId,
+            status: 'completed',
+            tenantId: context.tenantId ?? 'default',
+            duration: durationMsEnd,
+            cost: state.executionSpendUsd,
+            nodesCompleted: nodesCompletedEnd,
           });
           return;
         }
@@ -897,6 +969,13 @@ export class Orchestrator {
           traceId: context.traceId,
           spanId: context.spanId,
         });
+        void dispatchWebhooks('execution.failed', {
+          executionId: context.executionId,
+          scenarioId: context.scenarioId,
+          error: state.error.message,
+          tenantId: context.tenantId ?? 'default',
+          failedNode: state.currentNodeId,
+        });
       }
     } catch (error) {
       // Критическая ошибка - запускаем компенсацию
@@ -915,6 +994,13 @@ export class Orchestrator {
         errorMessage: state.error?.message,
         traceId: context.traceId,
         spanId: context.spanId,
+      });
+      void dispatchWebhooks('execution.failed', {
+        executionId: context.executionId,
+        scenarioId: context.scenarioId,
+        error: state.error?.message ?? 'Unknown error',
+        tenantId: context.tenantId ?? 'default',
+        failedNode: state.currentNodeId,
       });
 
       // Обновляем статус выполнения в БД
@@ -1035,6 +1121,8 @@ export class Orchestrator {
 
     const maxRetries = node.retry?.maxAttempts || 3;
     const initialDelay = node.retry?.initialDelay || 1000;
+    const meterTid = state.tenantId ?? context.tenantId ?? 'default';
+    const meterOrg = context.orgId ?? (await resolveOrgIdForTenant(meterTid));
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       result.retryCount = attempt;
@@ -1052,7 +1140,9 @@ export class Orchestrator {
           deploymentLane: context.deploymentLane,
           shadowToolStub: context.isShadowRun === true,
           executionSpendUsd: spendBefore > 0 ? spendBefore : undefined,
-          tenantId: state.tenantId ?? context.tenantId ?? 'default'
+          tenantId: meterTid,
+          orgId: context.orgId,
+          mockToolConfig: context.spec.mockToolConfig,
         };
 
         const fromPrevious =
@@ -1071,12 +1161,24 @@ export class Orchestrator {
 
         // Выполнение через gateway
         const response = await this.gateway.execute(request, tool);
+        try {
+          getUsageMeter().track(meterOrg, meterTid, 'tool_calls', 1);
+        } catch (_) {
+          /* best-effort */
+        }
 
         if (response.success) {
           state.executionSpendUsd = spendBefore + estimateToolCallCostUsd(tool);
           result.state = NodeExecutionState.COMPLETED;
           result.outputs = response.outputs;
           result.completedAt = new Date();
+          void dispatchWebhooks('node.completed', {
+            executionId: context.executionId,
+            nodeId: node.id,
+            scenarioId: context.scenarioId,
+            toolId: toolId!,
+            output: response.outputs ?? null,
+          });
           return result;
         } else {
           // Если не последняя попытка, ждем перед повтором
@@ -1115,6 +1217,8 @@ export class Orchestrator {
   ): Promise<NodeExecutionResult> {
     const maxRetries = node.retry?.maxAttempts || 1; // Агенты обычно не требуют retry
     const initialDelay = node.retry?.initialDelay || 1000;
+    const agentMeterTid = state.tenantId ?? context.tenantId ?? 'default';
+    const agentMeterOrg = context.orgId ?? (await resolveOrgIdForTenant(agentMeterTid));
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       result.retryCount = attempt;
@@ -1174,12 +1278,23 @@ export class Orchestrator {
           deploymentLane: context.deploymentLane,
           shadowToolStub: context.isShadowRun === true,
           executionSpendUsd: state.executionSpendUsd ?? 0,
-          tenantId: state.tenantId ?? context.tenantId ?? 'default'
+          tenantId: agentMeterTid,
+          orgId: context.orgId,
         };
 
         // Выполняем агента
         const agentResult = await this.agentRuntime.execute(agentContext);
         state.executionSpendUsd = agentContext.executionSpendUsd ?? state.executionSpendUsd ?? 0;
+
+        try {
+          const meter = getUsageMeter();
+          meter.track(agentMeterOrg, agentMeterTid, 'agent_calls', 1);
+          if (agentResult.totalTokens > 0) {
+            meter.track(agentMeterOrg, agentMeterTid, 'llm_tokens', agentResult.totalTokens);
+          }
+        } catch (_) {
+          /* best-effort */
+        }
 
         if (agentResult.success) {
           result.state = NodeExecutionState.COMPLETED;

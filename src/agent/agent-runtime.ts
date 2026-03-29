@@ -92,6 +92,8 @@ export interface AgentExecutionContext {
   executionSpendUsd?: number;
   /** Тенант (X-Tenant-ID) → ToolRequestContext и OPA input */
   tenantId?: string;
+  /** Organization ID for gateway / OPA (aligned with orchestrator action nodes) */
+  orgId?: string;
 }
 
 /**
@@ -710,7 +712,9 @@ Do not just return tool call JSON - always follow up with a natural language exp
       costGuardExceeded: costGuardExceeded ? true : undefined,
       tokensUsedSoFar,
       executionSpendUsd: spendBefore > 0 ? spendBefore : undefined,
-      tenantId: context.tenantId ?? 'default'
+      tenantId: context.tenantId ?? 'default',
+      orgId: context.orgId,
+      mockToolConfig: context.scenarioSpec.mockToolConfig,
     };
 
     const request: ToolRequest = {

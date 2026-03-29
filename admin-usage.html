@@ -5,43 +5,267 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Usage Dashboard — Scenario Builder</title>
   <link rel="stylesheet" href="/admin-styles.css">
+  <style>
+    .usage-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 16px; }
+    .usage-toolbar .field { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
+    .usage-kpis { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+    .usage-kpi {
+      flex: 1;
+      min-width: 140px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: var(--bg-light, #f8fafc);
+      border: 1px solid var(--border, #e2e8f0);
+    }
+    .usage-kpi .k { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+    .usage-kpi .v { font-size: 1.35rem; font-weight: 600; margin-top: 4px; }
+    .usage-kpi.warn .v { color: #b45309; }
+    .usage-kpi.bad .v { color: #b91c1c; }
+    .quota-bar { margin: 10px 0; }
+    .quota-bar .label { font-size: 0.85rem; margin-bottom: 4px; display: flex; justify-content: space-between; gap: 8px; }
+    .quota-bar .track { height: 10px; background: #e2e8f0; border-radius: 6px; overflow: hidden; }
+    .quota-bar .fill { height: 100%; background: linear-gradient(90deg, #22c55e, #eab308); border-radius: 6px; min-width: 2px; }
+    .quota-bar .fill.over { background: linear-gradient(90deg, #f97316, #dc2626); }
+    .usage-table-wrap { overflow-x: auto; margin-top: 12px; }
+    .usage-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+    .usage-table th, .usage-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border, #e2e8f0); }
+    .usage-table tbody tr:hover { background: #f8fafc; }
+    .usage-table .over { color: #b91c1c; font-weight: 600; }
+    details.usage-raw { margin-top: 12px; }
+    details.usage-raw summary { cursor: pointer; font-size: 0.875rem; color: var(--text-secondary); }
+    .api-err { display: none; padding: 10px 12px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; font-size: 0.875rem; margin-bottom: 12px; }
+    .api-err.visible { display: block; }
+    .muted { color: var(--text-secondary); font-size: 0.875rem; }
+  </style>
 </head>
 <body>
   <div class="admin-container">
     <nav class="admin-nav">
-      <a href="/admin">← Back to Admin</a>
-      <h1>Usage Dashboard</h1>
+      <a href="/admin-dashboard.html">← Admin</a>
+      <a href="/admin-runs.html" style="margin-left:12px;">Выполнения</a>
+      <a href="/admin-deployment.html" style="margin-left:8px;">Deploy</a>
+      <h1>Usage dashboard</h1>
     </nav>
     <main class="admin-main">
-      <section id="usage-summary">
-        <h2>Current Period Usage</h2>
+      <section id="usage-summary" class="section-card">
+        <div class="usage-toolbar">
+          <div class="field">
+            <label for="orgSelect">Organization</label>
+            <select id="orgSelect" class="config-input"></select>
+          </div>
+          <div class="field">
+            <label for="periodInput">Period (YYYY-MM)</label>
+            <input type="text" id="periodInput" class="config-input" placeholder="2026-03">
+          </div>
+          <div class="field">
+            <label for="tenantFilter">Tenant (optional)</label>
+            <input type="text" id="tenantFilter" class="config-input" placeholder="matches X-Tenant-ID">
+          </div>
+          <button type="button" class="btn-primary" id="btnRefresh">Refresh</button>
+        </div>
+        <p class="muted">Usage from <code>/api/usage</code>; quota caps from <code>/api/quotas</code>. Optional tenant filter scopes usage rows to one workspace (must match your resolved <code>X-Tenant-ID</code>). Set Bearer via other admin pages (<code>admin-common.js</code>).</p>
+        <div id="usageApiErr" class="api-err" role="alert"></div>
+        <div id="usage-kpis" class="usage-kpis"></div>
+        <h2>Usage vs quota</h2>
         <div id="usage-bars"></div>
+        <h2 style="margin-top:20px;">Table</h2>
+        <div id="usage-table-host" class="usage-table-wrap"></div>
       </section>
-      <section id="usage-history">
-        <h2>History</h2>
-        <div id="history-chart"></div>
+      <section id="usage-history" class="section-card">
+        <h2>Raw JSON</h2>
+        <details class="usage-raw">
+          <summary>Show /api/usage response</summary>
+          <div id="usage-raw" class="muted" style="font-family:ui-monospace,monospace;font-size:0.8rem;white-space:pre-wrap;margin-top:8px;"></div>
+        </details>
       </section>
     </main>
   </div>
+  <script src="/admin-common.js"></script>
   <script>
-    async function loadUsage() {
+    function defaultPeriod() {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      return y + '-' + m;
+    }
+    document.getElementById('periodInput').value = defaultPeriod();
+
+    async function loadOrgs() {
+      const sel = document.getElementById('orgSelect');
+      sel.innerHTML = '';
       try {
-        const res = await fetch('/api/usage');
-        const data = await res.json();
-        const container = document.getElementById('usage-bars');
-        if (!Array.isArray(data) || data.length === 0) {
-          container.innerHTML = '<p>No usage data yet.</p>';
+        const r = await fetch('/api/orgs', withTenantHeaders());
+        const data = await r.json();
+        const rows = Array.isArray(data) ? data : [];
+        if (!rows.length) {
+          const o = document.createElement('option');
+          o.value = 'default';
+          o.textContent = 'default';
+          sel.appendChild(o);
           return;
         }
-        container.innerHTML = data.map(function(r) {
-          return '<div class="usage-bar"><strong>' + r.metric + '</strong>: ' + r.value + ' (' + r.period + ')</div>';
-        }).join('');
+        rows.forEach(function (org) {
+          const o = document.createElement('option');
+          o.value = org.id;
+          o.textContent = org.name + ' (' + org.slug + ')';
+          sel.appendChild(o);
+        });
       } catch (e) {
-        document.getElementById('usage-bars').innerHTML = '<p>Error loading usage data.</p>';
+        const o = document.createElement('option');
+        o.value = 'default';
+        o.textContent = 'default (org list failed)';
+        sel.appendChild(o);
       }
     }
-    loadUsage();
+
+    async function loadAll() {
+      const orgId = document.getElementById('orgSelect').value || 'default';
+      const period = (document.getElementById('periodInput').value || defaultPeriod()).trim();
+      const tenantExtra = (document.getElementById('tenantFilter').value || '').trim();
+      const usageQs =
+        'orgId=' +
+        encodeURIComponent(orgId) +
+        '&period=' +
+        encodeURIComponent(period) +
+        (tenantExtra ? '&tenantId=' + encodeURIComponent(tenantExtra) : '');
+      const bars = document.getElementById('usage-bars');
+      const rawEl = document.getElementById('usage-raw');
+      const kpiHost = document.getElementById('usage-kpis');
+      const tblHost = document.getElementById('usage-table-host');
+      const errEl = document.getElementById('usageApiErr');
+      bars.innerHTML = '<p class="muted">Loading…</p>';
+      rawEl.textContent = '';
+      tblHost.innerHTML = '';
+      kpiHost.innerHTML = '';
+      errEl.className = 'api-err';
+      errEl.textContent = '';
+      try {
+        const [uR, qR] = await Promise.all([
+          fetch('/api/usage?' + usageQs, withTenantHeaders()),
+          fetch('/api/quotas?orgId=' + encodeURIComponent(orgId), withTenantHeaders()),
+        ]);
+        const usage = await uR.json();
+        const quotas = await qR.json();
+        rawEl.textContent = JSON.stringify(usage, null, 2);
+
+        if (!uR.ok) {
+          errEl.className = 'api-err visible';
+          errEl.textContent = 'Usage API HTTP ' + uR.status + (usage && usage.error ? ': ' + JSON.stringify(usage.error) : '');
+        } else if (!Array.isArray(usage)) {
+          errEl.className = 'api-err visible';
+          errEl.textContent = 'Usage payload is not an array.';
+        }
+        if (!qR.ok && !errEl.textContent) {
+          errEl.className = 'api-err visible';
+          errEl.textContent = 'Quotas API HTTP ' + qR.status;
+        }
+
+        if (!Array.isArray(usage)) {
+          bars.innerHTML = '<p class="muted">Cannot render usage (invalid response).</p>';
+          kpiHost.innerHTML = '';
+          tblHost.innerHTML = '';
+          return;
+        }
+
+        if (usage.length === 0) {
+          bars.innerHTML = '<p class="muted">No usage rows for this org/period.</p>';
+          kpiHost.innerHTML =
+            '<div class="usage-kpi"><div class="k">Rows</div><div class="v">0</div></div>' +
+            '<div class="usage-kpi"><div class="k">Tenants</div><div class="v">0</div></div>' +
+            '<div class="usage-kpi"><div class="k">Over quota</div><div class="v">0</div></div>';
+          return;
+        }
+
+        const quotaByMetric = {};
+        if (Array.isArray(quotas)) {
+          quotas.forEach(function (q) {
+            if (q.period === 'monthly' || q.period === period) {
+              quotaByMetric[q.metric] = q;
+            }
+          });
+        }
+
+        const tenants = {};
+        let overCount = 0;
+        usage.forEach(function (r) {
+          const tid = r.tenantId != null ? String(r.tenantId) : '—';
+          tenants[tid] = true;
+          const q = quotaByMetric[r.metric];
+          const val = Number(r.value) || 0;
+          const cap = q ? Number(q.limitVal) : null;
+          if (cap != null && cap > 0 && val >= cap) overCount++;
+        });
+        const tenantN = Object.keys(tenants).length;
+        const kpiOverClass = overCount > 0 ? 'usage-kpi bad' : 'usage-kpi';
+        kpiHost.innerHTML =
+          '<div class="usage-kpi"><div class="k">Usage rows</div><div class="v">' + usage.length + '</div></div>' +
+          '<div class="usage-kpi"><div class="k">Tenants</div><div class="v">' + tenantN + '</div></div>' +
+          '<div class="' +
+          kpiOverClass +
+          '"><div class="k">At / over cap</div><div class="v">' +
+          overCount +
+          '</div></div>';
+
+        bars.innerHTML = usage.map(function (r) {
+          const q = quotaByMetric[r.metric];
+          const val = Number(r.value) || 0;
+          const cap = q ? Number(q.limitVal) : null;
+          let pct = 0;
+          let over = false;
+          if (cap != null && cap > 0) {
+            pct = Math.min(100, Math.round((val / cap) * 100));
+            over = val >= cap;
+          } else {
+            pct = val > 0 ? 100 : 0;
+          }
+          const capStr = cap != null ? ' / cap ' + cap + (q && q.action ? ' (' + q.action + ')' : '') : '';
+          return (
+            '<div class="quota-bar">' +
+            '<div class="label"><span><strong>' + r.metric + '</strong> · ' + r.period + '</span><span>' + val + capStr + '</span></div>' +
+            '<div class="track"><div class="fill' + (over ? ' over' : '') + '" style="width:' + pct + '%"></div></div>' +
+            '</div>'
+          );
+        }).join('');
+
+        const rows = usage
+          .map(function (r) {
+            const q = quotaByMetric[r.metric];
+            const val = Number(r.value) || 0;
+            const cap = q ? Number(q.limitVal) : null;
+            const over = cap != null && cap > 0 && val >= cap;
+            const capStr = cap != null ? String(cap) : '—';
+            const pct =
+              cap != null && cap > 0 ? Math.min(100, Math.round((val / cap) * 100)) + '%' : '—';
+            return (
+              '<tr' +
+              (over ? ' class="over"' : '') +
+              '><td>' +
+              String(r.metric).replace(/</g, '') +
+              '</td><td>' +
+              String(r.tenantId != null ? r.tenantId : '—').replace(/</g, '') +
+              '</td><td>' +
+              val +
+              '</td><td>' +
+              capStr +
+              '</td><td>' +
+              pct +
+              '</td></tr>'
+            );
+          })
+          .join('');
+        tblHost.innerHTML =
+          '<table class="usage-table"><thead><tr><th>Metric</th><th>Tenant</th><th>Value</th><th>Cap</th><th>%</th></tr></thead><tbody>' +
+          rows +
+          '</tbody></table>';
+      } catch (e) {
+        bars.innerHTML = '<p class="muted">Error: ' + String(e) + '</p>';
+        errEl.className = 'api-err visible';
+        errEl.textContent = String(e);
+      }
+    }
+
+    document.getElementById('btnRefresh').onclick = loadAll;
+    loadOrgs().then(loadAll);
   </script>
-  <script src="/admin-common-rbac.js"></script>
 </body>
 </html>

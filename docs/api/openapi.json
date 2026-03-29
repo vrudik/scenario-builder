@@ -84,6 +84,82 @@
           "createdAt": { "type": "string", "format": "date-time" }
         }
       },
+      "QuotaConfig": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "orgId": { "type": "string" },
+          "metric": { "type": "string" },
+          "limitVal": { "type": "integer" },
+          "period": { "type": "string", "enum": ["monthly", "daily"] },
+          "action": { "type": "string", "enum": ["warn", "block", "throttle"] },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "QuotaUpsertRequest": {
+        "type": "object",
+        "required": ["orgId", "metric", "limitVal", "period", "action"],
+        "properties": {
+          "orgId": { "type": "string" },
+          "metric": { "type": "string" },
+          "limitVal": { "type": "number" },
+          "period": { "type": "string", "enum": ["monthly", "daily"] },
+          "action": { "type": "string", "enum": ["warn", "block", "throttle"] }
+        }
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "orgId": { "type": "string" },
+          "url": { "type": "string" },
+          "events": { "type": "string", "description": "JSON array string in DB" },
+          "active": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "secret": { "type": "string", "description": "Returned only on create" }
+        }
+      },
+      "WebhookCreateRequest": {
+        "type": "object",
+        "required": ["orgId", "url", "events"],
+        "properties": {
+          "orgId": { "type": "string" },
+          "url": { "type": "string", "format": "uri" },
+          "events": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "WebhookPatchRequest": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "format": "uri" },
+          "events": { "type": "array", "items": { "type": "string" } },
+          "active": { "type": "boolean" }
+        }
+      },
+      "WebhookTestResult": {
+        "type": "object",
+        "properties": { "delivered": { "type": "boolean" } }
+      },
+      "DeploymentOperator": {
+        "type": "object",
+        "properties": {
+          "canaryPercent": { "type": "number" },
+          "activeLane": { "type": "string", "enum": ["stable", "canary"] },
+          "notes": { "type": "string" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "UsageRecordRow": {
+        "type": "object",
+        "properties": {
+          "metric": { "type": "string" },
+          "value": { "type": "number" },
+          "period": { "type": "string" },
+          "tenantId": { "type": "string" }
+        }
+      },
       "Error": {
         "type": "object",
         "properties": {
@@ -385,16 +461,134 @@
         }
       }
     },
+    "/quotas": {
+      "get": {
+        "summary": "List quota configs for an organization",
+        "tags": ["Quotas"],
+        "parameters": [{ "name": "orgId", "in": "query", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": {
+            "description": "Quota rows",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/QuotaConfig" } } } }
+          }
+        }
+      },
+      "post": {
+        "summary": "Upsert a quota (orgId + metric + period)",
+        "tags": ["Quotas"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QuotaUpsertRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Saved quota", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QuotaConfig" } } } }
+        }
+      },
+      "delete": {
+        "summary": "Delete quota by row id",
+        "tags": ["Quotas"],
+        "parameters": [{ "name": "id", "in": "query", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Deleted", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" } } } } } }
+        }
+      }
+    },
+    "/webhooks": {
+      "get": {
+        "summary": "List webhook endpoints for an organization",
+        "tags": ["Webhooks"],
+        "parameters": [{ "name": "orgId", "in": "query", "schema": { "type": "string", "default": "default" } }],
+        "responses": {
+          "200": {
+            "description": "Webhook rows (no secrets)",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookEndpoint" } } } }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create webhook endpoint",
+        "tags": ["Webhooks"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookCreateRequest" } } }
+        },
+        "responses": {
+          "201": { "description": "Created (includes secret once)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookEndpoint" } } } }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "get": {
+        "summary": "Get webhook by id",
+        "tags": ["Webhooks"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Webhook", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookEndpoint" } } } }
+        }
+      },
+      "patch": {
+        "summary": "Update webhook",
+        "tags": ["Webhooks"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookPatchRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookEndpoint" } } } }
+        }
+      },
+      "delete": {
+        "summary": "Delete webhook",
+        "tags": ["Webhooks"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Deleted", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" } } } } } }
+        }
+      }
+    },
+    "/webhooks/{id}/test": {
+      "post": {
+        "summary": "Send test delivery to webhook URL",
+        "tags": ["Webhooks"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Test result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookTestResult" } } } }
+        }
+      }
+    },
+    "/deployment/operator": {
+      "get": {
+        "summary": "Get global deployment / canary operator state",
+        "tags": ["Deployment"],
+        "responses": {
+          "200": { "description": "Operator descriptor", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeploymentOperator" } } } }
+        }
+      },
+      "patch": {
+        "summary": "Update operator canary and lane",
+        "tags": ["Deployment"],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeploymentOperator" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeploymentOperator" } } } }
+        }
+      }
+    },
     "/usage": {
       "get": {
-        "summary": "Get usage statistics",
+        "summary": "Usage aggregates for org and calendar period",
         "tags": ["Usage"],
         "parameters": [
-          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date-time" } },
-          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date-time" } }
+          { "name": "orgId", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "period", "in": "query", "required": true, "schema": { "type": "string", "description": "YYYY-MM" } },
+          { "name": "tenantId", "in": "query", "schema": { "type": "string", "description": "Optional workspace tenant filter" } }
         ],
         "responses": {
-          "200": { "description": "Usage data", "content": { "application/json": { "schema": { "type": "object" } } } }
+          "200": {
+            "description": "Usage rows",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/UsageRecordRow" } } } }
+          }
         }
       }
     }

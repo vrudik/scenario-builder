@@ -3,6 +3,10 @@
   "version": "0.1.1",
   "description": "Конструктор автономных сценариев и агентных процессов",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./sdk": "./dist/sdk/index.js"
+  },
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -15,7 +19,10 @@
     "test:opa": "node scripts/run-opa-test.mjs",
     "smoke:agent": "node scripts/smoke-agent-execute.mjs",
     "e2e:smoke": "node scripts/e2e-smoke.mjs",
+    "e2e:smoke:auth": "node scripts/e2e-smoke-auth.mjs",
     "e2e:smoke:opa": "node scripts/e2e-smoke-opa.mjs",
+    "sdk:types": "npx --yes openapi-typescript@7.6.1 docs/api/openapi.json -o src/sdk/openapi-types.ts",
+    "sdk:v0": "npm run sdk:types",
     "bundle:opa": "node scripts/opa-bundle.mjs",
     "test:manual": "tsx test-manual.ts",
     "audit:find": "tsx src/web/audit-api.ts find",

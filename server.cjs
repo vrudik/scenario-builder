@@ -2,7 +2,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
+const { pathToFileURL } = require('url');
 
 // Устанавливаем DATABASE_URL по умолчанию для Prisma
 if (!process.env.DATABASE_URL) {
@@ -11,15 +11,78 @@ if (!process.env.DATABASE_URL) {
 
 const PORT = 3000;
 
-/** Multi-tenant: заголовок X-Tenant-ID (1–64 символов, [a-zA-Z0-9._-]); иначе default */
-function resolveTenantId(req) {
+/** Prefer tsc output so `node server.cjs` works without ad-hoc .js under src/web. */
+function compiledWebModuleUrl(name) {
+  const distFile = path.join(__dirname, 'dist', 'web', `${name}.js`);
+  if (fs.existsSync(distFile)) {
+    return pathToFileURL(distFile).href;
+  }
+  return pathToFileURL(path.join(__dirname, 'src', 'web', `${name}.js`)).href;
+}
+
+/** Valid X-Tenant-ID from header, or undefined (caller uses identity default). */
+function parseXTenantIdHeader(req) {
   const h = req.headers['x-tenant-id'];
   const raw = (Array.isArray(h) ? h[0] : h) || '';
   const s = String(raw).trim();
   if (s === '' || !/^[a-zA-Z0-9._-]{1,64}$/.test(s)) {
-    return 'default';
+    return undefined;
   }
   return s;
+}
+
+let _tenantResolverMod = null;
+async function loadTenantResolver() {
+  if (!_tenantResolverMod) {
+    _tenantResolverMod = await import(compiledWebModuleUrl('tenant-resolver'));
+  }
+  return _tenantResolverMod;
+}
+
+let _authWebMod = null;
+async function loadAuthWebModule() {
+  if (!_authWebMod) {
+    _authWebMod = await import(compiledWebModuleUrl('auth'));
+  }
+  return _authWebMod;
+}
+
+/**
+ * Identity-bound tenant (see tenant-resolver.ts). bodyTenantHint: optional override from JSON body.
+ */
+async function resolveTrustedTenant(req, bodyTenantHint) {
+  try {
+    const { resolveTenant } = await loadTenantResolver();
+    const header = parseXTenantIdHeader(req);
+    let override = header;
+    if (override === undefined && bodyTenantHint != null && bodyTenantHint !== '') {
+      const t = String(bodyTenantHint).trim();
+      if (t !== '' && /^[a-zA-Z0-9._-]{1,64}$/.test(t)) override = t;
+    }
+    const result = await resolveTenant(req.auth, override);
+    if (result === null) return { ok: false };
+    return { ok: true, tenantId: result.tenantId, orgId: result.orgId };
+  } catch (err) {
+    if (req.auth?.orgId) {
+      console.warn('[tenant] resolveTrustedTenant failed:', err?.message || err);
+      return { ok: false };
+    }
+    return { ok: true, tenantId: req.auth?.tenantId ?? 'default', orgId: null };
+  }
+}
+
+function respondTenantForbidden(res) {
+  res.writeHead(403, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Tenant not allowed for this organization' }));
+}
+
+async function trustedTenantOrRespond(req, res, bodyTenantHint) {
+  const t = await resolveTrustedTenant(req, bodyTenantHint);
+  if (!t.ok) {
+    respondTenantForbidden(res);
+    return null;
+  }
+  return t;
 }
 
 // ---------------------------------------------------------------------------
@@ -28,7 +91,40 @@ function resolveTenantId(req) {
 // ---------------------------------------------------------------------------
 const AUTH_MODE = (process.env.AUTH_MODE || 'off').toLowerCase().trim();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const KEY_PREFIX_RE = /^sb_(live|test)_[a-f0-9]{64}$/;
+
+/**
+ * Org-bound API keys may only read/write their own org's usage and quotas.
+ * Superuser (scopes:null), admin password, and dev anonymous admin bypass.
+ */
+function enforceOrgAccess(req, res, requestedOrgId) {
+  const auth = req.auth;
+  if (!auth) return true;
+  const want = String(requestedOrgId || 'default');
+  if (auth.scopes === null) return true;
+  if (auth.method === 'admin_password') return true;
+  if (
+    AUTH_MODE === 'off' &&
+    auth.method === 'anonymous' &&
+    Array.isArray(auth.roles) &&
+    auth.roles.includes('admin')
+  ) {
+    return true;
+  }
+  if (auth.orgId && auth.orgId !== want) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Organization access denied' }));
+    return false;
+  }
+  return true;
+}
+
+/** Pass callerOrgId into quota-api delete to block cross-org deletes by id. */
+function orgCheckPayloadForQuota(req, base) {
+  if (req.auth?.scopes !== null && req.auth?.orgId) {
+    return { ...base, callerOrgId: req.auth.orgId };
+  }
+  return base;
+}
 
 /**
  * Check if req.auth has the required scope. scopes:null = all.
@@ -92,10 +188,6 @@ function classifyExecutionError(execution) {
   };
 }
 
-function hashApiKey(raw) {
-  return crypto.createHash('sha256').update(raw).digest('hex');
-}
-
 /** Lazy-loaded Prisma client (ESM dynamic import from CJS). */
 let _prismaPromise = null;
 function getPrisma() {
@@ -108,70 +200,51 @@ function getPrisma() {
   return _prismaPromise;
 }
 
-/** In-memory key cache: hash → { identity, expiresAt } */
-const authKeyCache = new Map();
-const AUTH_CACHE_TTL = 60_000;
+/** Workspace.tenantId → Org.id for quota / usage alignment */
+async function resolveOrgIdForTenantServer(prisma, tenantId) {
+  try {
+    const ws = await prisma.workspace.findUnique({ where: { tenantId }, select: { orgId: true } });
+    if (ws?.orgId) return ws.orgId;
+    const org = await prisma.org.findUnique({ where: { slug: 'default' }, select: { id: true } });
+    return org?.id ?? 'default';
+  } catch {
+    return 'default';
+  }
+}
+
+/** Returns { blocked, limit?, current?, remaining? } when quota blocks further use */
+async function checkQuotaBlockedServer(prisma, tenantId, metric) {
+  const orgId = await resolveOrgIdForTenantServer(prisma, tenantId);
+  const period = new Date().toISOString().slice(0, 7);
+  const quota = await prisma.quotaConfig.findUnique({
+    where: { orgId_metric_period: { orgId, metric, period: 'monthly' } },
+  });
+  if (!quota || quota.action !== 'block') return { blocked: false };
+  const usage = await prisma.usageRecord.findUnique({
+    where: { orgId_tenantId_period_metric: { orgId, tenantId, period, metric } },
+  });
+  const current = usage?.value ?? 0;
+  if (current >= quota.limitVal) {
+    return { blocked: true, limit: quota.limitVal, current, remaining: 0 };
+  }
+  return { blocked: false, remaining: quota.limitVal - current };
+}
 
 /**
- * Resolve auth from the request.
- * Returns { ok, identity, error? } where identity has { method, keyId?, tenantId, roles, scopes }.
+ * Resolve auth from the request (shared cache + rules in src/web/auth.ts).
+ * Returns { ok, identity, error? } where identity has { method, keyId?, tenantId, roles, scopes, orgId? }.
  */
 async function resolveAuth(req) {
-  if (AUTH_MODE === 'off') {
-    return { ok: true, identity: { method: 'anonymous', tenantId: 'default', roles: ['admin'], scopes: null } };
+  const mod = await loadAuthWebModule();
+  const h = req.headers['authorization'];
+  const raw = h !== undefined && h !== null ? (Array.isArray(h) ? h[0] : h) : undefined;
+  const authHeader = raw === undefined || raw === null ? undefined : String(raw);
+  const result = await mod.resolveAuth(authHeader);
+  if (!result.ok || !result.identity) return result;
+  if (result.identity.method === 'api_key' && result.identity.orgId === undefined) {
+    return { ...result, identity: { ...result.identity, orgId: null } };
   }
-
-  const authHeader = req.headers['authorization'];
-  if (!authHeader) {
-    if (AUTH_MODE === 'optional') {
-      return { ok: true, identity: { method: 'anonymous', tenantId: 'default', roles: ['viewer'], scopes: null } };
-    }
-    return { ok: false, identity: null, error: 'Authorization header required' };
-  }
-
-  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-  if (!token) {
-    return { ok: false, identity: null, error: 'Empty bearer token' };
-  }
-
-  if (ADMIN_PASSWORD && token === ADMIN_PASSWORD) {
-    return { ok: true, identity: { method: 'admin_password', tenantId: 'default', roles: ['admin'], scopes: null } };
-  }
-
-  if (!KEY_PREFIX_RE.test(token)) {
-    return { ok: false, identity: null, error: 'Invalid API key format' };
-  }
-
-  const hash = hashApiKey(token);
-
-  const cached = authKeyCache.get(hash);
-  if (cached && Date.now() < cached.expiresAt) {
-    return { ok: true, identity: cached.identity };
-  }
-
-  try {
-    const prisma = await getPrisma();
-    const row = await prisma.apiKey.findUnique({ where: { keyHash: hash } });
-    if (!row) return { ok: false, identity: null, error: 'Unknown API key' };
-    if (row.revokedAt) return { ok: false, identity: null, error: 'API key revoked' };
-    if (row.expiresAt && row.expiresAt < new Date()) return { ok: false, identity: null, error: 'API key expired' };
-
-    let roles = ['user'];
-    try { roles = JSON.parse(row.roles); } catch {}
-    let scopes = null;
-    if (row.scopes) try { scopes = JSON.parse(row.scopes); } catch {}
-
-    const identity = { method: 'api_key', keyId: row.id, tenantId: row.tenantId, roles, scopes };
-    authKeyCache.set(hash, { identity, expiresAt: Date.now() + AUTH_CACHE_TTL });
-
-    prisma.apiKey.update({ where: { keyHash: hash }, data: { lastUsedAt: new Date() } }).catch(() => {});
-    return { ok: true, identity };
-  } catch (err) {
-    if (AUTH_MODE === 'optional') {
-      return { ok: true, identity: { method: 'anonymous', tenantId: 'default', roles: ['viewer'], scopes: null } };
-    }
-    return { ok: false, identity: null, error: 'Auth service unavailable' };
-  }
+  return result;
 }
 
 // Хранилище метрик для экспорта
@@ -613,14 +686,50 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- Auth middleware for /api/* routes ---
-  if (pathname.startsWith('/api/')) {
+  const authExemptPaths = ['/api/status', '/api/health', '/api/metrics', '/metrics', '/api/docs', '/api/openapi.json'];
+  if (pathname.startsWith('/api/') && !authExemptPaths.includes(pathname)) {
     const auth = await resolveAuth(req);
     if (!auth.ok) {
+      // Fire-and-forget auth failure audit
+      (async () => {
+        try {
+          const p = await getPrisma();
+          await p.auditLog.create({
+            data: {
+              action: 'auth_failure',
+              actor: 'anonymous',
+              outcome: 'failure',
+              severity: 'warning',
+              message: auth.error || null,
+              tenantId: null,
+              orgId: null,
+            },
+          });
+        } catch {}
+      })();
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: auth.error }));
       return;
     }
     req.auth = auth.identity;
+
+    // Fire-and-forget auth success audit
+    (async () => {
+      try {
+        const p = await getPrisma();
+        await p.auditLog.create({
+          data: {
+            action: 'auth_success',
+            actor: auth.identity?.keyId || (auth.identity?.method === 'admin_password' ? 'admin' : 'anonymous'),
+            outcome: 'success',
+            severity: 'info',
+            message: null,
+            tenantId: auth.identity?.tenantId || null,
+            orgId: auth.identity?.orgId || null,
+          },
+        });
+      } catch {}
+    })();
   }
 
   // Отладка: логируем запросы к admin-страницам
@@ -801,6 +910,20 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end('Error loading resource: ' + error.message);
+    }
+  } else if (pathname === '/docs/contracts/WEBHOOK_DELIVERY.md') {
+    try {
+      const contractPath = path.join(__dirname, 'docs', 'contracts', 'WEBHOOK_DELIVERY.md');
+      if (fs.existsSync(contractPath)) {
+        res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+        res.end(fs.readFileSync(contractPath, 'utf-8'));
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Contract file not found');
+      }
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end(String(err.message || err));
     }
   } else if (pathname === '/observability-dashboard.html' || pathname === '/observability') {
     // Отдача observability dashboard (сначала из web/, затем из корня)
@@ -1050,7 +1173,14 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
     req.on('data', chunk => { body += chunk.toString(); });
     req.on('end', async () => {
       try {
-        const requestData = { ...JSON.parse(body), _tenantId: resolveTenantId(req) };
+        const parsed = JSON.parse(body);
+        const tt = await trustedTenantOrRespond(req, res, parsed.tenantId ?? parsed._tenantId);
+        if (!tt) return;
+        const requestData = {
+          ...parsed,
+          _tenantId: tt.tenantId,
+          _orgId: tt.orgId ?? req.auth?.orgId ?? null,
+        };
         const { scenarioId, userIntent, workflowType = 'agent-only' } = requestData;
         
         if (!scenarioId || !userIntent) {
@@ -1061,6 +1191,17 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
           }));
           return;
         }
+
+        try {
+          const prisma = await getPrisma();
+          const qTenantId = requestData._tenantId || 'default';
+          const q = await checkQuotaBlockedServer(prisma, qTenantId, 'executions');
+          if (q.blocked) {
+            res.writeHead(429, { 'Content-Type': 'application/json', 'X-Quota-Remaining': '0' });
+            res.end(JSON.stringify({ error: 'Quota exceeded', metric: 'executions', limit: q.limit, current: q.current }));
+            return;
+          }
+        } catch (_e) { /* quota check is best-effort */ }
         
         // Выполняем через tsx
         const tempRequestFile = path.join(__dirname, 'temp-orchestrator-request.json');
@@ -1687,8 +1828,10 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
           }));
           return;
         }
-        
-        requestData = { ...requestData, _tenantId: resolveTenantId(req) };
+
+        const tt = await trustedTenantOrRespond(req, res);
+        if (!tt) return;
+        requestData = { ...requestData, _tenantId: tt.tenantId };
         
         // Выполняем через tsx
         const tempRequestFile = path.join(__dirname, `temp-templates-${Date.now()}.json`);
@@ -1811,8 +1954,10 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
                 offset: url.searchParams.get('offset'),
               };
             }
-            
-            requestData._tenantId = resolveTenantId(req);
+
+            const tt = await trustedTenantOrRespond(req, res);
+            if (!tt) return;
+            requestData._tenantId = tt.tenantId;
             
             // Выполняем через tsx
             const tempRequestFile = path.join(__dirname, `temp-queues-${Date.now()}.json`);
@@ -2007,8 +2152,10 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
             }));
             return;
           }
-          
-          requestData._tenantId = resolveTenantId(req);
+
+          const tt = await trustedTenantOrRespond(req, res);
+          if (!tt) return;
+          requestData._tenantId = tt.tenantId;
           
           // Выполняем через tsx
           const tempRequestFile = path.join(__dirname, `temp-queues-${Date.now()}.json`);
@@ -2172,6 +2319,9 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
           const pathParts = pathname.split('/').filter(p => p);
           let command = '';
           let requestData = {};
+
+          const tt = await trustedTenantOrRespond(req, res);
+          if (!tt) return;
           
           if (pathParts.length === 4 && pathParts[3] === 'executions') {
             // GET /api/scenarios/:id/executions
@@ -2181,12 +2331,12 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
               executionStatus: url.searchParams.get('status'),
               limit: url.searchParams.get('limit'),
               offset: url.searchParams.get('offset'),
-              _tenantId: resolveTenantId(req)
+              _tenantId: tt.tenantId
             };
           } else if (pathParts.length === 3) {
             // GET /api/scenarios/:id
             command = 'get';
-            requestData = { id: pathParts[2], _tenantId: resolveTenantId(req) };
+            requestData = { id: pathParts[2], _tenantId: tt.tenantId };
           } else {
             // GET /api/scenarios
             command = 'list';
@@ -2194,7 +2344,7 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
               status: url.searchParams.get('status'),
               limit: url.searchParams.get('limit'),
               offset: url.searchParams.get('offset'),
-              _tenantId: resolveTenantId(req)
+              _tenantId: tt.tenantId
             };
           }
           
@@ -2447,23 +2597,27 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         const pathParts = pathname.split('/').filter(p => p);
         let command = '';
         let requestData = {};
+        const parsedBody = body ? JSON.parse(body) : {};
+
+        const tt = await trustedTenantOrRespond(req, res, parsedBody.tenantId ?? parsedBody._tenantId);
+        if (!tt) return;
         
         if (req.method === 'POST') {
           // POST /api/scenarios
           command = 'create';
-          requestData = { ...(body ? JSON.parse(body) : {}), _tenantId: resolveTenantId(req) };
+          requestData = { ...parsedBody, _tenantId: tt.tenantId };
         } else if (req.method === 'PUT') {
           // PUT /api/scenarios/:id
           command = 'update';
           requestData = {
             id: pathParts[2],
-            ...(body ? JSON.parse(body) : {}),
-            _tenantId: resolveTenantId(req)
+            ...parsedBody,
+            _tenantId: tt.tenantId
           };
         } else if (req.method === 'DELETE') {
           // DELETE /api/scenarios/:id
           command = 'delete';
-          requestData = { id: pathParts[2], _tenantId: resolveTenantId(req) };
+          requestData = { id: pathParts[2], _tenantId: tt.tenantId };
         }
         
         if (!command) {
@@ -2782,30 +2936,34 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
     });
   } else if (pathname.match(/^\/api\/executions\/[^/]+\/diagnosis$/) && req.method === 'GET') {
     if (!requireScope(req, res, 'executions:read')) return;
-    try {
-      const executionId = pathname.split('/')[3];
-      const { exec } = require('child_process');
-      const { promisify } = require('util');
-      const execAsync = promisify(exec);
-      const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
-      const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
-      const scriptPath = path.join(__dirname, 'src', 'web', 'scenarios-api.ts');
-      const tempFile = path.join(__dirname, `temp-diag-${Date.now()}.json`);
-      fs.writeFileSync(tempFile, JSON.stringify({ executionId, _tenantId: resolveTenantId(req) }), 'utf-8');
+    (async () => {
+      try {
+        const tt = await trustedTenantOrRespond(req, res);
+        if (!tt) return;
+        const executionId = pathname.split('/')[3];
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+        const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+        const scriptPath = path.join(__dirname, 'src', 'web', 'scenarios-api.ts');
+        const tempFile = path.join(__dirname, `temp-diag-${Date.now()}.json`);
+        fs.writeFileSync(tempFile, JSON.stringify({ executionId, _tenantId: tt.tenantId }), 'utf-8');
 
-      const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "execution-get" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
-      try { fs.unlinkSync(tempFile); } catch {}
+        const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "execution-get" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+        try { fs.unlinkSync(tempFile); } catch {}
 
-      let execution;
-      try { execution = JSON.parse(stdout); } catch { execution = null; }
+        let execution;
+        try { execution = JSON.parse(stdout); } catch { execution = null; }
 
-      const diagnosis = classifyExecutionError(execution);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(diagnosis));
-    } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
+        const diagnosis = classifyExecutionError(execution);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(diagnosis));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    })();
   } else if (pathname.startsWith('/api/executions')) {
     if (!requireScope(req, res, 'executions:read')) return;
     const { exec } = require('child_process');
@@ -2816,6 +2974,9 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
     req.on('data', chunk => { body += chunk.toString(); });
     req.on('end', async () => {
       try {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const tt = await trustedTenantOrRespond(req, res);
+        if (!tt) return;
         const pathParts = pathname.split('/').filter(p => p);
         let command = '';
         let requestData = {};
@@ -2829,20 +2990,20 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
             requestData = {
               limit: lim && lim.trim() !== '' ? lim : '40',
               ...(scen && scen.trim() !== '' ? { scenarioId: scen.trim() } : {}),
-              _tenantId: resolveTenantId(req)
+              _tenantId: tt.tenantId
             };
           } else if (pathParts.length === 4 && pathParts[3] === 'unified-status') {
             // GET /api/executions/:executionId/unified-status
             command = 'execution-unified-status';
-            requestData = { executionId: pathParts[2], _tenantId: resolveTenantId(req) };
+            requestData = { executionId: pathParts[2], _tenantId: tt.tenantId };
           } else if (pathParts.length === 4 && pathParts[3] === 'events') {
             // GET /api/executions/:executionId/events
             command = 'execution-events';
-            requestData = { executionId: pathParts[2], _tenantId: resolveTenantId(req) };
+            requestData = { executionId: pathParts[2], _tenantId: tt.tenantId };
           } else if (pathParts.length === 3) {
             // GET /api/executions/:executionId
             command = 'execution';
-            requestData = { executionId: pathParts[2], _tenantId: resolveTenantId(req) };
+            requestData = { executionId: pathParts[2], _tenantId: tt.tenantId };
           }
         }
         
@@ -2963,8 +3124,21 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
     req.on('end', async () => {
       try {
         const requestData = JSON.parse(body);
+        const tt = await trustedTenantOrRespond(req, res, requestData.tenantId ?? requestData._tenantId);
+        if (!tt) return;
         const userIntent = requestData.userIntent || '';
         const scenarioId = requestData.scenarioId || 'web-scenario';
+
+        try {
+          const prisma = await getPrisma();
+          const qTenantId = tt.tenantId;
+          const q = await checkQuotaBlockedServer(prisma, qTenantId, 'agent_calls');
+          if (q.blocked) {
+            res.writeHead(429, { 'Content-Type': 'application/json', 'X-Quota-Remaining': '0' });
+            res.end(JSON.stringify({ error: 'Quota exceeded', metric: 'agent_calls', limit: q.limit, current: q.current }));
+            return;
+          }
+        } catch (_e) { /* quota check is best-effort */ }
         
         // Проверяем наличие зависимостей
         const zodExists = fs.existsSync(path.join(__dirname, 'node_modules', 'zod', 'package.json'));
@@ -2999,26 +3173,16 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         
         // Создаем временный файл с запросом
         const tempRequestFile = path.join(__dirname, 'temp-request.json');
-        const headerTenantRaw = String(
-          (Array.isArray(req.headers['x-tenant-id'])
-            ? req.headers['x-tenant-id'][0]
-            : req.headers['x-tenant-id']) || ''
-        ).trim();
-        const tenantFromHeader =
-          headerTenantRaw && /^[a-zA-Z0-9._-]{1,64}$/.test(headerTenantRaw)
-            ? headerTenantRaw
-            : null;
-        const bodyTenant = requestData.tenantId ?? requestData._tenantId;
-        const bodyTenantStr =
-          bodyTenant != null && String(bodyTenant).trim() !== ''
-            ? String(bodyTenant).trim()
-            : '';
-        const tenantId =
-          tenantFromHeader ||
-          (bodyTenantStr && /^[a-zA-Z0-9._-]{1,64}$/.test(bodyTenantStr) ? bodyTenantStr : 'default');
+        const tenantId = tt.tenantId;
         fs.writeFileSync(
           tempRequestFile,
-          JSON.stringify({ userIntent, scenarioId, tenantId, _tenantId: tenantId }),
+          JSON.stringify({
+            userIntent,
+            scenarioId,
+            tenantId,
+            _tenantId: tenantId,
+            _orgId: tt.orgId ?? req.auth?.orgId ?? null,
+          }),
           'utf-8'
         );
         
@@ -3132,10 +3296,13 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
   // -----------------------------------------------------------------------
   } else if (pathname === '/api/audit/export' && req.method === 'GET') {
     if (!requireScope(req, res, 'audit:export')) return;
+    (async () => {
     try {
       const params = {};
       for (const [k, v] of url.searchParams) { params[k] = v; }
-      params.tenantId = params.tenantId || resolveTenantId(req);
+      const tt = await trustedTenantOrRespond(req, res, params.tenantId);
+      if (!tt) return;
+      params.tenantId = tt.tenantId;
 
       const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
       const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
@@ -3157,6 +3324,7 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
+    })();
 
   // -----------------------------------------------------------------------
   // /api/audit/cleanup — Audit log retention cleanup
@@ -3246,6 +3414,17 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       const params = {};
       for (const [k, v] of url.searchParams) { params[k] = v; }
       params.orgId = params.orgId || 'default';
+      if (!enforceOrgAccess(req, res, params.orgId)) return;
+
+      const ttUsage = await trustedTenantOrRespond(req, res);
+      if (!ttUsage) return;
+      if (params.tenantId != null && String(params.tenantId).trim() !== '') {
+        const tid = String(params.tenantId).trim();
+        if (tid !== ttUsage.tenantId) {
+          respondTenantForbidden(res);
+          return;
+        }
+      }
 
       if (pathname.endsWith('/history')) command = 'history';
       else if (pathname.endsWith('/breakdown')) command = 'breakdown';
@@ -3265,6 +3444,129 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
+
+  // -----------------------------------------------------------------------
+  // /api/quotas — QuotaConfig CRUD
+  // -----------------------------------------------------------------------
+  } else if (pathname === '/api/quotas' && req.method === 'GET') {
+    if (!requireScope(req, res, 'org:read')) return;
+    try {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      const orgId = url.searchParams.get('orgId') || 'default';
+      if (!enforceOrgAccess(req, res, orgId)) return;
+      const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+      const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+      const scriptPath = path.join(__dirname, 'src', 'web', 'quota-api.ts');
+      const tempFile = path.join(__dirname, `temp-quota-${Date.now()}.json`);
+      fs.writeFileSync(tempFile, JSON.stringify({ orgId }), 'utf-8');
+      const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "list" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+      try { fs.unlinkSync(tempFile); } catch {}
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(stdout);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+  } else if (pathname === '/api/quotas' && req.method === 'POST') {
+    if (!requireScope(req, res, 'org:write')) return;
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const orgForQuota = String(data.orgId || 'default');
+        if (!enforceOrgAccess(req, res, orgForQuota)) return;
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+        const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+        const scriptPath = path.join(__dirname, 'src', 'web', 'quota-api.ts');
+        const tempFile = path.join(__dirname, `temp-quota-${Date.now()}.json`);
+        fs.writeFileSync(tempFile, JSON.stringify(data), 'utf-8');
+        const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "upsert" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+        try { fs.unlinkSync(tempFile); } catch {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(stdout);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+  } else if (pathname === '/api/quotas' && req.method === 'DELETE') {
+    if (!requireScope(req, res, 'org:write')) return;
+    try {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      const id = url.searchParams.get('id');
+      if (!id) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Query id required' }));
+        return;
+      }
+      const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+      const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+      const scriptPath = path.join(__dirname, 'src', 'web', 'quota-api.ts');
+      const tempFile = path.join(__dirname, `temp-quota-${Date.now()}.json`);
+      fs.writeFileSync(tempFile, JSON.stringify(orgCheckPayloadForQuota(req, { id })), 'utf-8');
+      const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "delete" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+      try { fs.unlinkSync(tempFile); } catch {}
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(stdout);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+
+  // -----------------------------------------------------------------------
+  // /api/deployment/operator — Canary / lane (Configuration)
+  // -----------------------------------------------------------------------
+  } else if (pathname === '/api/deployment/operator' && req.method === 'GET') {
+    if (!requireScope(req, res, 'org:read')) return;
+    try {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+      const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+      const scriptPath = path.join(__dirname, 'src', 'web', 'deployment-api.ts');
+      const tempFile = path.join(__dirname, `temp-deploy-${Date.now()}.json`);
+      fs.writeFileSync(tempFile, JSON.stringify({}), 'utf-8');
+      const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "get" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+      try { fs.unlinkSync(tempFile); } catch {}
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(stdout);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+  } else if (pathname === '/api/deployment/operator' && req.method === 'PATCH') {
+    if (!requireScope(req, res, 'org:write')) return;
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
+        const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
+        const scriptPath = path.join(__dirname, 'src', 'web', 'deployment-api.ts');
+        const tempFile = path.join(__dirname, `temp-deploy-${Date.now()}.json`);
+        fs.writeFileSync(tempFile, JSON.stringify(data), 'utf-8');
+        const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "set" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
+        try { fs.unlinkSync(tempFile); } catch {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(stdout);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
 
   // -----------------------------------------------------------------------
   // /api/onboarding — Onboarding flow
@@ -3393,6 +3695,13 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
         const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "${command}" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
         try { fs.unlinkSync(tempFile); } catch {}
 
+        if (command === 'workspace-create' || command === 'workspace-update') {
+          try {
+            const trm = await loadTenantResolver();
+            if (typeof trm.clearTenantCache === 'function') trm.clearTenantCache();
+          } catch (_) { /* ignore */ }
+        }
+
         const status = (req.method === 'POST') ? 201 : 200;
         res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(stdout);
@@ -3407,8 +3716,11 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
   // -----------------------------------------------------------------------
   } else if (pathname === '/api/auth/keys' && req.method === 'GET') {
     if (!requireScope(req, res, 'admin:write')) return;
+    (async () => {
     try {
-      const tenantId = resolveTenantId(req);
+      const tt = await trustedTenantOrRespond(req, res);
+      if (!tt) return;
+      const tenantId = tt.tenantId;
       const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
       const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
       const scriptPath = path.join(__dirname, 'src', 'web', 'auth-api.ts');
@@ -3427,6 +3739,7 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
+    })();
 
   } else if (pathname === '/api/auth/keys' && req.method === 'POST') {
     if (!requireScope(req, res, 'admin:write')) return;
@@ -3435,7 +3748,9 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
     req.on('end', async () => {
       try {
         const data = JSON.parse(body || '{}');
-        data.tenantId = data.tenantId || resolveTenantId(req);
+        const tt = await trustedTenantOrRespond(req, res, data.tenantId);
+        if (!tt) return;
+        data.tenantId = tt.tenantId;
 
         const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
         const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
@@ -3463,6 +3778,15 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       const keyId = pathname.split('/api/auth/keys/')[1];
       if (!keyId) throw new Error('Key ID required');
 
+      let keyHashToEvict = null;
+      try {
+        const prisma = await getPrisma();
+        const row = await prisma.apiKey.findUnique({ where: { id: keyId }, select: { keyHash: true } });
+        keyHashToEvict = row?.keyHash || null;
+      } catch {
+        /* best-effort */
+      }
+
       const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx.cmd');
       const tsxCmd = fs.existsSync(tsxPath) ? `"${tsxPath}"` : 'npx tsx';
       const scriptPath = path.join(__dirname, 'src', 'web', 'auth-api.ts');
@@ -3475,7 +3799,14 @@ agent_llm_calls_total ${metricsStore.agent_llm_calls_total}
       const { stdout } = await execAsync(`${tsxCmd} "${scriptPath}" "revoke" "${tempFile}"`, { cwd: __dirname, timeout: 15000 });
       try { fs.unlinkSync(tempFile); } catch {}
 
-      authKeyCache.clear();
+      try {
+        const am = await loadAuthWebModule();
+        if (keyHashToEvict && typeof am.invalidateApiKeyCacheByHash === 'function') {
+          am.invalidateApiKeyCacheByHash(keyHashToEvict);
+        } else if (typeof am.cacheClear === 'function') {
+          am.cacheClear();
+        }
+      } catch (_) { /* ignore */ }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(stdout);
@@ -3708,6 +4039,11 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log('   GET  /api/auth/keys - список API-ключей');
   console.log('   POST /api/auth/keys - создать API-ключ');
   console.log('   DELETE /api/auth/keys/:id - отозвать API-ключ');
+  console.log('   GET  /api/quotas?orgId=… — лимиты (QuotaConfig)');
+  console.log('   POST /api/quotas — upsert лимита');
+  console.log('   DELETE /api/quotas?id=… — удалить лимит');
+  console.log('   GET  /api/deployment/operator — canary / lane (Configuration)');
+  console.log('   PATCH /api/deployment/operator — обновить canary / lane');
   console.log('');
   console.log('🔑 Auth mode: ' + AUTH_MODE + (ADMIN_PASSWORD ? ' (admin password set)' : ''));
   console.log('   См. API_DOCUMENTATION.md для полной документации');

@@ -355,6 +355,10 @@
                                 <span>📊</span>
                                 <span>Executions</span>
                             </button>
+                            <button class="action-btn btn-small" onclick="runScenario('${scenario.id}')" data-min-role="operator" style="background:#22c55e;color:#fff;">
+                                <span>▶</span>
+                                <span>Run</span>
+                            </button>
                             <button class="action-btn btn-small secondary" onclick="editScenario('${scenario.id}')">
                                 <span>✏️</span>
                                 <span>Edit</span>
@@ -475,11 +479,11 @@
                 const url = id ? `/api/scenarios/${id}` : '/api/scenarios';
                 const method = id ? 'PUT' : 'POST';
                 
-                const response = await fetch(url, {
+                const response = await fetch(url, withTenantHeaders({
                     method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name, description, spec, status })
-                });
+                }));
                 
                 const data = await response.json();
                 
@@ -491,6 +495,35 @@
                 }
             } catch (error) {
                 alert('Error saving scenario: ' + error.message);
+            }
+        }
+
+        async function runScenario(scenarioId) {
+            const sc = scenarios.find(s => s.id === scenarioId);
+            const defaultIntent =
+                (sc && sc.spec && sc.spec.goal) || (sc && sc.name) || 'Run scenario from admin';
+            const userIntent = window.prompt('User intent / message for orchestrator:', defaultIntent);
+            if (userIntent === null) return;
+            const intent = String(userIntent).trim() || defaultIntent;
+            try {
+                const response = await fetch('/api/orchestrator/execute', withTenantHeaders({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scenarioId,
+                        userIntent: intent,
+                        workflowType: 'agent-only',
+                    }),
+                }));
+                const data = await response.json();
+                if (response.ok) {
+                    const ex = data.executionId ? ` ID: ${data.executionId}` : '';
+                    alert('Execution finished.' + ex + ' Open Runs to inspect details.');
+                } else {
+                    alert('Error: ' + (data.error?.message || data.error || JSON.stringify(data)));
+                }
+            } catch (error) {
+                alert('Error running scenario: ' + error.message);
             }
         }
 

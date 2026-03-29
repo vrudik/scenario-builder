@@ -32,11 +32,18 @@ export class WebhookRepository {
   }
 
   async findActiveByEvent(eventType: string) {
+    return this.findActiveByEvents([eventType]);
+  }
+
+  /** Match endpoints subscribed to any of the given event types (or `*`). */
+  async findActiveByEvents(eventTypes: string[]) {
+    const want = new Set(eventTypes);
     const all = await prisma.webhookEndpoint.findMany({ where: { active: true } });
     return all.filter(ep => {
       try {
         const events: string[] = JSON.parse(ep.events);
-        return events.includes(eventType) || events.includes('*');
+        if (events.includes('*')) return true;
+        return events.some(e => want.has(e));
       } catch {
         return false;
       }

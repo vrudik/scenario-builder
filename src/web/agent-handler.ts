@@ -14,9 +14,13 @@ import { registerAllTools } from '../tools';
 import { OpaHttpClient } from '../policy/opa-http-client';
 import { ScenarioRepository } from '../db/repositories/scenario-repository';
 import { normalizeTenantId } from '../utils/tenant-id';
+import { getUsageMeter } from '../services/usage-meter.js';
+import { checkQuota, resolveOrgIdForTenant } from '../services/quota-enforcer.js';
 
 export interface ExecuteAgentOptions {
   tenantId?: string;
+  /** From API key; avoids extra DB lookup when set */
+  orgId?: string | null;
 }
 
 function attachOpa(gateway: ToolGateway): void {
@@ -136,6 +140,20 @@ export async function executeAgentRequest(
 }> {
   try {
     const tenantId = normalizeTenantId(options?.tenantId);
+
+    // Quota check before execution
+    try {
+      const quotaResult = await checkQuota(tenantId, 'agent_calls');
+      if (!quotaResult.allowed) {
+        return {
+          success: false,
+          toolCallsExecuted: 0,
+          totalTokens: 0,
+          error: { code: 'QUOTA_EXCEEDED', message: `Quota exceeded for agent_calls (limit: ${quotaResult.limit}, current: ${quotaResult.current})` }
+        };
+      }
+    } catch (_) { /* quota check is best-effort */ }
+
     const registry = new ToolRegistry();
     const gateway = new ToolGateway();
     registerAllTools(registry, gateway);
@@ -185,6 +203,21 @@ export async function executeAgentRequest(
       userIntent,
       tenantId
     });
+
+    try {
+      const orgId =
+        options?.orgId && String(options.orgId).trim() !== ''
+          ? String(options.orgId).trim()
+          : await resolveOrgIdForTenant(tenantId);
+      const meter = getUsageMeter();
+      meter.track(orgId, tenantId, 'agent_calls', 1);
+      if (result.toolCallsExecuted > 0) {
+        meter.track(orgId, tenantId, 'tool_calls', result.toolCallsExecuted);
+      }
+      if (result.totalTokens > 0) {
+        meter.track(orgId, tenantId, 'llm_tokens', result.totalTokens);
+      }
+    } catch (_) { /* best-effort */ }
 
     return {
       success: result.success,

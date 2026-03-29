@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Onboarding — Scenario Builder</title>
+    <link rel="stylesheet" href="/admin-styles.css">
+    <style>
+        .onb-steps { max-width: 720px; margin: 0 auto; }
+        .onb-step { border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 16px; margin-bottom: 16px; background: var(--bg-light, #f8fafc); }
+        .onb-step h3 { margin: 0 0 8px; font-size: 1.05rem; }
+        .onb-step p { margin: 0 0 12px; color: var(--text-secondary, #64748b); font-size: 0.9rem; }
+        .onb-api-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+        .onb-api-row input { flex: 1; min-width: 200px; padding: 8px; border-radius: 6px; border: 1px solid var(--border); }
+        .tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-top: 12px; }
+        .tpl-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: #fff; }
+        .status-pill { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 0.8rem; }
+        .status-pill.done { background: #dcfce7; color: #166534; }
+        .status-pill.pending { background: #fef9c3; color: #854d0e; }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-brand"><span>⚙️</span><span>Scenario Builder Admin</span></div>
+            <div class="nav-links">
+                <a href="/admin-dashboard.html" class="nav-link"><span>📊</span><span>Overview</span></a>
+                <a href="/admin-onboarding.html" class="nav-link active"><span>🚀</span><span>Onboarding</span></a>
+                <a href="/admin-templates.html" class="nav-link"><span>📚</span><span>Templates</span></a>
+                <a href="/admin-scenarios.html" class="nav-link"><span>📋</span><span>Scenarios</span></a>
+                <a href="/admin-runs.html" class="nav-link"><span>🎯</span><span>Runs</span></a>
+            </div>
+            <div class="nav-status"></div>
+        </div>
+    </nav>
+
+    <div class="admin-container" style="padding: 24px;">
+        <h1>First-run onboarding</h1>
+        <p class="config-description" style="margin-bottom: 24px;">
+            Six steps from welcome to your first execution. If the server uses <code>AUTH_MODE=required</code>, set an API key or admin password below (stored only in this browser).
+        </p>
+
+        <div class="onb-steps">
+            <div class="onb-step">
+                <h3>1. Welcome</h3>
+                <p>Scenario Builder runs governed, observable scenario execution with optional Temporal durability.</p>
+            </div>
+
+            <div class="onb-step">
+                <h3>2. API access (when auth is required)</h3>
+                <p>Paste <code>sb_live_…</code> key or admin password. Saved as Bearer in localStorage for admin pages.</p>
+                <div class="onb-api-row">
+                    <input type="password" id="apiBearerInput" placeholder="Bearer token (API key or ADMIN_PASSWORD)" autocomplete="off" />
+                    <button type="button" class="action-btn" id="apiBearerSave">Save</button>
+                </div>
+            </div>
+
+            <div class="onb-step">
+                <h3>3. Onboarding status</h3>
+                <p id="onbStatusText">Loading…</p>
+                <span id="onbStatusPill" class="status-pill pending">…</span>
+            </div>
+
+            <div class="onb-step">
+                <h3>4. Starter templates</h3>
+                <p>Published beginner templates from the catalog.</p>
+                <div id="tplGrid" class="tpl-grid"><p>Loading templates…</p></div>
+                <p style="margin-top:12px;"><a href="/admin-templates.html" class="action-btn secondary btn-small">Open full template gallery →</a></p>
+            </div>
+
+            <div class="onb-step">
+                <h3>5. Create & run</h3>
+                <p>Create a scenario from a template, then run it from Scenarios or use the demo.</p>
+                <p>
+                    <a href="/admin-templates.html" class="action-btn btn-small">Templates</a>
+                    <a href="/admin-scenarios.html" class="action-btn btn-small secondary">Scenarios</a>
+                    <a href="/demo-e2e.html" class="action-btn btn-small secondary">Demo E2E</a>
+                </p>
+            </div>
+
+            <div class="onb-step">
+                <h3>6. Mark complete</h3>
+                <p>Marks default org onboarding as done (for your own tracking).</p>
+                <button type="button" class="action-btn" id="onbCompleteBtn">Mark onboarding complete</button>
+                <p id="onbCompleteMsg" class="config-description" style="margin-top:8px;"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/admin-common.js"></script>
+    <script>
+        (function () {
+            var inp = document.getElementById('apiBearerInput');
+            var tok = typeof getApiBearerToken === 'function' ? getApiBearerToken() : '';
+            if (inp && tok) inp.placeholder = '(saved — enter new value to replace)';
+
+            document.getElementById('apiBearerSave').addEventListener('click', function () {
+                var v = inp.value.trim();
+                if (typeof setApiBearerToken === 'function') setApiBearerToken(v);
+                alert(v ? 'Saved. Admin API calls will send Authorization.' : 'Cleared saved token.');
+                inp.value = '';
+            });
+
+            async function loadStatus() {
+                var el = document.getElementById('onbStatusText');
+                var pill = document.getElementById('onbStatusPill');
+                try {
+                    var r = await fetch('/api/onboarding/status', withTenantHeaders());
+                    var j = await r.json();
+                    if (!r.ok) throw new Error(j.error || r.status);
+                    el.textContent = j.completed
+                        ? 'Onboarding was completed' + (j.completedAt ? ' at ' + j.completedAt : '') + '.'
+                        : 'Onboarding not marked complete yet.';
+                    pill.textContent = j.completed ? 'Complete' : 'In progress';
+                    pill.className = 'status-pill ' + (j.completed ? 'done' : 'pending');
+                } catch (e) {
+                    el.textContent = 'Could not load status: ' + e.message;
+                    pill.textContent = 'Error';
+                    pill.className = 'status-pill pending';
+                }
+            }
+
+            async function loadTemplates() {
+                var grid = document.getElementById('tplGrid');
+                try {
+                    var r = await fetch('/api/onboarding/templates', withTenantHeaders());
+                    var list = await r.json();
+                    if (!r.ok) throw new Error(list.error || r.status);
+                    if (!Array.isArray(list) || list.length === 0) {
+                        grid.innerHTML = '<p>No published beginner templates. Seed DB or open gallery.</p>';
+                        return;
+                    }
+                    grid.innerHTML = list.map(function (t) {
+                        return '<div class="tpl-card"><strong>' + escapeHtml(t.name || t.id) + '</strong>' +
+                            '<p style="font-size:0.85rem;margin:8px 0 0;color:var(--text-secondary);">' +
+                            escapeHtml((t.description || '').slice(0, 120)) + '</p></div>';
+                    }).join('');
+                } catch (e) {
+                    grid.innerHTML = '<p>Error: ' + escapeHtml(e.message) + '</p>';
+                }
+            }
+
+            function escapeHtml(s) {
+                var d = document.createElement('div');
+                d.textContent = s == null ? '' : String(s);
+                return d.innerHTML;
+            }
+
+            document.getElementById('onbCompleteBtn').addEventListener('click', async function () {
+                var msg = document.getElementById('onbCompleteMsg');
+                msg.textContent = '';
+                try {
+                    var r = await fetch('/api/onboarding/complete', withTenantHeaders({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }));
+                    var j = await r.json();
+                    if (!r.ok) throw new Error(j.error || r.status);
+                    msg.textContent = 'Saved.';
+                    loadStatus();
+                } catch (e) {
+                    msg.textContent = 'Error: ' + e.message;
+                }
+            });
+
+            if (typeof initAdminTenantBar === 'function') initAdminTenantBar();
+            loadStatus();
+            loadTemplates();
+        })();
+    </script>
+    <script src="/admin-common-rbac.js"></script>
+</body>
+</html>

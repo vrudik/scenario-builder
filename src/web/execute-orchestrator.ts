@@ -17,6 +17,8 @@ import { OpaHttpClient } from '../policy/opa-http-client';
 import { KafkaEventBus, IEventBus } from '../events';
 import { ExecutionRepository, NodeExecutionRepository } from '../db/repositories';
 import { normalizeTenantId } from '../utils/tenant-id';
+import { checkQuota } from '../services/quota-enforcer.js';
+import { mergeMockToolConfigForExecution } from '../services/execution-mock-config.js';
 import * as fs from 'fs';
 
 // Перенаправляем все логи в stderr
@@ -44,11 +46,30 @@ async function main() {
     
     const requestData = JSON.parse(fs.readFileSync(requestFile, 'utf-8'));
     const tenantId = normalizeTenantId(requestData._tenantId ?? requestData.tenantId);
+    const orgIdFromReq =
+      typeof requestData._orgId === 'string' && requestData._orgId.trim() !== ''
+        ? requestData._orgId.trim()
+        : typeof requestData.orgId === 'string' && requestData.orgId.trim() !== ''
+          ? requestData.orgId.trim()
+          : undefined;
     const { scenarioId, userIntent, workflowType = 'agent-only' } = requestData;
-    
+
     if (!scenarioId || !userIntent) {
       throw new Error('scenarioId and userIntent are required');
     }
+
+    // Quota check before execution
+    try {
+      const quotaResult = await checkQuota(tenantId, 'executions');
+      if (!quotaResult.allowed) {
+        process.stdout.write(JSON.stringify({
+          success: false,
+          error: { code: 'QUOTA_EXCEEDED', message: 'Quota exceeded' },
+          quota: { metric: 'executions', limit: quotaResult.limit, current: quotaResult.current, remaining: 0 }
+        }) + '\n');
+        process.exit(0);
+      }
+    } catch (_) { /* quota check is best-effort */ }
     
     // Инициализация компонентов
     const registry = new ToolRegistry();
@@ -126,8 +147,13 @@ async function main() {
       temporalClient
     );
     
-    // Создание спецификации сценария
+    // Создание спецификации сценария (mockToolConfig: DB scenario + template + request body)
     const validator = new ScenarioSpecValidator();
+    const mergedMock = await mergeMockToolConfigForExecution(scenarioId, tenantId, {
+      templateId: typeof requestData.templateId === 'string' ? requestData.templateId : undefined,
+      mockToolConfig: requestData.mockToolConfig,
+      _mockConfig: requestData._mockConfig,
+    });
     const spec = validator.parse({
       version: '0.1.0',
       id: scenarioId,
@@ -155,7 +181,8 @@ async function main() {
           requiresApproval: false
         }
       ],
-      riskClass: RiskClass.LOW
+      riskClass: RiskClass.LOW,
+      ...(mergedMock ? { mockToolConfig: mergedMock } : {}),
     });
     
     // Политика исполнения из spec (allowed/forbidden tools) + опционально OPA поверх
@@ -271,11 +298,13 @@ async function main() {
       executionId: `exec-${Date.now()}`,
       workflowGraph,
       spec,
+      tenantId,
+      orgId: orgIdFromReq,
       userId: 'web-user',
       userRoles: ['user'],
       traceId: `trace-${Date.now()}`,
       spanId: `span-${Date.now()}`,
-      startedAt: new Date()
+      startedAt: new Date(),
     };
     
     // Выполнение workflow

@@ -178,6 +178,18 @@ export const ScenarioSpecSchema = z.object({
   /** Override deployment descriptor; без поля — эвристика по riskClass в ScenarioBuilder */
   deployment: DeploymentSpecSchema.optional(),
 
+  /**
+   * Mock tool responses (и для шаблонов с тем же форматом): gateway выдаёт stub до реального executor.
+   */
+  mockToolConfig: z
+    .record(
+      z.object({
+        response: z.unknown(),
+        delay: z.number().nonnegative().optional(),
+      }),
+    )
+    .optional(),
+
   // Observability
   observability: ObservabilitySpecSchema.optional(),
   

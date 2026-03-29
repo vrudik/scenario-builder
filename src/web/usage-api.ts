@@ -18,23 +18,27 @@ async function main() {
   }
 
   const orgId = String(params.orgId || 'default');
+  const tenantFilter =
+    params.tenantId != null && String(params.tenantId).trim() !== ''
+      ? { tenantId: String(params.tenantId).trim() }
+      : {};
   let result: unknown;
 
   switch (command) {
     case 'current': {
       const period = params.period as string || new Date().toISOString().slice(0, 7);
       const records = await prisma.usageRecord.findMany({
-        where: { orgId, period },
+        where: { orgId, period, ...tenantFilter },
         orderBy: { metric: 'asc' },
       });
-      result = records.map(r => ({ metric: r.metric, value: r.value, period: r.period }));
+      result = records.map(r => ({ metric: r.metric, value: r.value, period: r.period, tenantId: r.tenantId }));
       break;
     }
 
     case 'history': {
       const metric = String(params.metric || 'executions');
       const records = await prisma.usageRecord.findMany({
-        where: { orgId, metric },
+        where: { orgId, metric, ...tenantFilter },
         orderBy: { period: 'desc' },
         take: 12,
       });
@@ -45,7 +49,7 @@ async function main() {
     case 'breakdown': {
       const period = params.period as string || new Date().toISOString().slice(0, 7);
       const records = await prisma.usageRecord.findMany({
-        where: { orgId, period },
+        where: { orgId, period, ...tenantFilter },
         orderBy: { value: 'desc' },
       });
       const byTenant = new Map<string, Record<string, number>>();

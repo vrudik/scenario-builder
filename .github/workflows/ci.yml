@@ -38,6 +38,16 @@ jobs:
       - name: Test
         run: npm test -- --run
 
+      - name: E2E smoke (AUTH_MODE=required)
+        if: runner.os == 'Linux'
+        env:
+          E2E_ADMIN_PASSWORD: e2e_ci_auth_pw
+        run: npm run e2e:smoke:auth
+
+      - name: Docker build (Linux)
+        if: runner.os == 'Linux'
+        run: docker build -t scenario-builder:ci .
+
       - name: OPA policy tests + bundle (Linux)
         if: runner.os != 'Windows'
         run: |
@@ -60,17 +70,6 @@ jobs:
       - name: Lint (non-blocking for now)
         continue-on-error: true
         run: npm run lint
-
-  # Сборка Docker-образа (без push в registry)
-  docker-image:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Docker build
-        run: docker build -t scenario-builder:ci .
 
   # Валидность compose для staging (без запуска контейнеров)
   staging-compose:

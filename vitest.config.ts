@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    env: {
+      DATABASE_URL: process.env.DATABASE_URL ?? 'file:./dev.db',
+    },
     include: ['tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',

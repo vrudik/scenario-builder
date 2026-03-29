@@ -35,9 +35,19 @@ Navigate to **http://localhost:3000**
 | Page | URL |
 |------|-----|
 | Admin Dashboard | `/admin-dashboard.html` |
+| Onboarding | `/admin-onboarding.html` |
 | Demo | `/demo-e2e.html` |
 | Trust & Guardrails | `/about-trust.html` |
 | Agent Test | `/test-agent.html` |
+| OpenAPI (Swagger) | `/api/docs` |
+
+## API authentication (full server)
+
+1. Copy `.env.example` → `.env` and set `AUTH_MODE` (`off` keeps backward compatibility).
+2. For `required` or `optional` with keys: set `ADMIN_PASSWORD` for a simple Bearer token, or create API keys via `POST /api/auth/keys` (needs a key with `admin:write` scope, or `AUTH_MODE=off` once).
+3. In the browser admin UI, open **Onboarding** and save the token under “API access”, or run `localStorage.setItem('scenarioBuilder.apiBearer', 'YOUR_TOKEN')` (with or without `Bearer ` prefix).
+
+All admin `fetch` helpers in `admin-common.js` send `X-Tenant-ID` and, if set, `Authorization`.
 
 Port override: `PORT=3001 npm run web` (Linux/macOS) or `$env:PORT=3001; npm run web` (PowerShell).
 

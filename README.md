@@ -13,6 +13,10 @@ Scenario Builder lets you define autonomous agent workflows as declarative specs
 - **Audit Trail** — every agent action logged with full context, exportable for compliance
 - **Observability** — OpenTelemetry tracing and metrics (Jaeger, Prometheus)
 - **Multi-tenant** — tenant-aware API, policy isolation, execution isolation
+- **Enterprise API** — API keys (`AUTH_MODE`), scoped RBAC, `/api/v1/*` routing, OpenAPI at `/api/docs`
+- **Org & workspaces** — Prisma models, `/api/orgs` CRUD, usage keyed by workspace `tenantId` → org
+- **Metering & quotas** — `UsageRecord` / `QuotaConfig`, orchestrator + agent paths increment usage; block quotas return **429** at the edge
+- **Webhooks** — registered endpoints receive scenario lifecycle events (HMAC-signed delivery)
 - **Event-driven** — Kafka event streaming between components
 
 ## Architecture
@@ -48,6 +52,8 @@ npm run web
 node server.cjs
 # Open http://localhost:3000/admin-dashboard.html
 ```
+
+Optional auth: set `AUTH_MODE` (`off` | `optional` | `required`) and `ADMIN_PASSWORD` in `.env` (see `.env.example`). With `required`, create an API key (or use the admin password as Bearer) and paste it in the admin UI onboarding step, or set localStorage key `scenarioBuilder.apiBearer` from the browser console.
 
 ### Optional: Temporal + OPA
 

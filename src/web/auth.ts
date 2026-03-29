@@ -131,6 +131,11 @@ export function cacheClear(): void {
   KEY_CACHE.clear();
 }
 
+/** Drop one API key from the in-memory auth cache (e.g. after revoke in the parent server process). */
+export function invalidateApiKeyCacheByHash(keyHash: string): void {
+  KEY_CACHE.delete(keyHash);
+}
+
 // ---------------------------------------------------------------------------
 // Core: resolve auth from raw Authorization header value
 // ---------------------------------------------------------------------------
@@ -178,9 +183,20 @@ export async function resolveAuth(authHeader: string | undefined): Promise<AuthR
 
   const cached = cacheGet(hash);
   if (cached) {
-    // fire-and-forget lastUsedAt update
-    prisma.apiKey.update({ where: { keyHash: hash }, data: { lastUsedAt: new Date() } }).catch(() => {});
-    return { ok: true, identity: cached };
+    try {
+      const alive = await prisma.apiKey.findUnique({
+        where: { keyHash: hash },
+        select: { revokedAt: true, expiresAt: true },
+      });
+      if (!alive || alive.revokedAt || (alive.expiresAt && alive.expiresAt < new Date())) {
+        KEY_CACHE.delete(hash);
+      } else {
+        prisma.apiKey.update({ where: { keyHash: hash }, data: { lastUsedAt: new Date() } }).catch(() => {});
+        return { ok: true, identity: cached };
+      }
+    } catch {
+      KEY_CACHE.delete(hash);
+    }
   }
 
   try {
@@ -270,11 +286,10 @@ export async function listApiKeys(tenantId?: string) {
 
 export async function revokeApiKey(id: string): Promise<boolean> {
   try {
+    const row = await prisma.apiKey.findUnique({ where: { id }, select: { keyHash: true } });
+    if (!row) return false;
     await prisma.apiKey.update({ where: { id }, data: { revokedAt: new Date() } });
-    // purge from cache
-    KEY_CACHE.forEach((v, k) => {
-      if (v.identity.keyId === id) KEY_CACHE.delete(k);
-    });
+    KEY_CACHE.delete(row.keyHash);
     return true;
   } catch {
     return false;

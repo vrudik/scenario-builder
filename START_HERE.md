@@ -59,6 +59,8 @@ npm run test:ui
 npm run test:coverage
 ```
 
+Полный сервер с БД и админ-API: `node server.cjs` (порт из `PORT`, по умолчанию 3000). Лёгкий режим без Prisma: `npm run web` → `src/web/server.ts`.
+
 ## 📝 Примеры использования
 
 ```bash

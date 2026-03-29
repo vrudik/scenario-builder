@@ -5,7 +5,8 @@
 
 export interface MockToolConfig {
   [toolId: string]: {
-    response: unknown;
+    /** Omitted or undefined → empty object output in executeMockTool */
+    response?: unknown;
     delay?: number; // optional simulated delay in ms
   };
 }
@@ -21,7 +22,7 @@ export function parseMockConfig(json: string | null | undefined): MockToolConfig
 
 export async function executeMockTool(
   toolId: string,
-  input: unknown,
+  _input: unknown,
   mockConfig: MockToolConfig,
 ): Promise<{ output: unknown; mocked: true }> {
   const config = mockConfig[toolId];
@@ -33,5 +34,5 @@ export async function executeMockTool(
     await new Promise(resolve => setTimeout(resolve, config.delay));
   }
 
-  return { output: config.response, mocked: true };
+  return { output: config.response !== undefined ? config.response : {}, mocked: true };
 }

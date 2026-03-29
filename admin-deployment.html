@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deployment / Canary — Scenario Builder</title>
+  <link rel="stylesheet" href="/admin-styles.css">
+  <style>
+    .deploy-status {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: var(--bg-light, #f8fafc);
+      border: 1px solid var(--border, #e2e8f0);
+      font-size: 0.875rem;
+    }
+    .deploy-status .lane-pill {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 0.8rem;
+    }
+    .deploy-status .lane-stable { background: #dcfce7; color: #166534; }
+    .deploy-status .lane-canary { background: #fef3c7; color: #92400e; }
+    .deploy-err {
+      display: none;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #991b1b;
+      font-size: 0.875rem;
+    }
+    .deploy-err.visible { display: block; }
+    .deploy-form-grid {
+      display: grid;
+      gap: 14px;
+      max-width: 560px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <nav class="top-nav">
+    <div class="nav-container">
+      <div class="nav-brand">
+        <span>⚙️</span>
+        <span>Scenario Builder Admin</span>
+      </div>
+      <div class="nav-links">
+        <a href="/admin-dashboard.html" class="nav-link"><span>📊</span><span>Overview</span></a>
+        <a href="/admin-runs.html" class="nav-link"><span>🎯</span><span>Выполнения</span></a>
+        <a href="/admin-usage.html" class="nav-link"><span>📉</span><span>Usage</span></a>
+        <a href="/admin-deployment.html" class="nav-link active"><span>🚦</span><span>Deploy</span></a>
+      </div>
+      <div class="nav-status">
+        <span class="status-indicator"></span>
+        <span>Operator</span>
+      </div>
+    </div>
+  </nav>
+  <div class="main-container">
+    <div class="page-header">
+      <h1 class="page-title">Deployment operator</h1>
+      <p class="page-subtitle">Глобальные переключатели полосы и доли canary в <code>Configuration</code> (демо / один инстанс).</p>
+    </div>
+    <div class="section-card">
+      <p class="hint"><code>GET</code> требует область <code>org:read</code>; <code>PATCH</code> — <code>org:write</code>. Задайте Bearer на другой админ-странице или в localStorage (<code>admin-common.js</code>).</p>
+      <div id="deployErr" class="deploy-err" role="alert"></div>
+      <div id="deployStatus" class="deploy-status" style="display:none;"></div>
+      <div id="current" style="font-family:ui-monospace,monospace;font-size:0.8rem;white-space:pre-wrap;margin-bottom:16px;color:var(--text-secondary);"></div>
+      <div class="deploy-form-grid">
+        <div>
+          <label class="config-label" for="canaryPercent">Canary % (0–100)</label>
+          <input type="number" id="canaryPercent" class="config-input" min="0" max="100" style="max-width:140px">
+        </div>
+        <div>
+          <label class="config-label" for="activeLane">Active lane</label>
+          <select id="activeLane" class="config-input" style="max-width:220px">
+            <option value="stable">stable</option>
+            <option value="canary">canary</option>
+          </select>
+        </div>
+        <div>
+          <label class="config-label" for="notes">Notes</label>
+          <textarea id="notes" class="config-input" rows="3" style="max-width:100%"></textarea>
+        </div>
+        <div>
+          <button type="button" class="btn-primary" id="btnSave">Apply</button>
+          <div id="saveOut" style="margin-top:10px;font-size:0.875rem;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="/admin-common.js"></script>
+  <script>
+    function showDeployErr(msg) {
+      var el = document.getElementById('deployErr');
+      if (!msg) {
+        el.className = 'deploy-err';
+        el.textContent = '';
+        return;
+      }
+      el.className = 'deploy-err visible';
+      el.textContent = msg;
+    }
+
+    function renderDeployStatus(j) {
+      var box = document.getElementById('deployStatus');
+      if (!box || !j || j.error) {
+        if (box) box.style.display = 'none';
+        return;
+      }
+      box.style.display = 'flex';
+      var lane = (j.activeLane || 'stable').toLowerCase();
+      var pillClass = lane === 'canary' ? 'lane-pill lane-canary' : 'lane-pill lane-stable';
+      var pct = j.canaryPercent != null ? j.canaryPercent : '—';
+      var updated = j.updatedAt ? new Date(j.updatedAt).toLocaleString() : '—';
+      box.innerHTML =
+        '<span class="' + pillClass + '">' + lane + '</span>' +
+        '<span>Canary traffic: <strong>' + pct + '%</strong></span>' +
+        '<span style="color:var(--text-secondary)">Обновлено: ' + updated + '</span>';
+    }
+
+    async function refresh() {
+      var el = document.getElementById('current');
+      showDeployErr('');
+      el.textContent = 'Loading…';
+      try {
+        var r = await fetch('/api/deployment/operator', withTenantHeaders());
+        var text = await r.text();
+        var j;
+        try {
+          j = JSON.parse(text);
+        } catch (_) {
+          el.textContent = text.slice(0, 400);
+          showDeployErr('Ответ не JSON (HTTP ' + r.status + ').');
+          document.getElementById('deployStatus').style.display = 'none';
+          return;
+        }
+        if (r.status === 403) {
+          showDeployErr('403: нужна область org:read (или суперuser).');
+          el.textContent = JSON.stringify(j, null, 2);
+          document.getElementById('deployStatus').style.display = 'none';
+          return;
+        }
+        el.textContent = JSON.stringify(j, null, 2);
+        if (j.canaryPercent != null) document.getElementById('canaryPercent').value = j.canaryPercent;
+        if (j.activeLane) document.getElementById('activeLane').value = j.activeLane;
+        if (j.notes != null) document.getElementById('notes').value = j.notes;
+        renderDeployStatus(j);
+      } catch (e) {
+        el.textContent = String(e);
+        showDeployErr('Сеть: ' + String(e));
+        document.getElementById('deployStatus').style.display = 'none';
+      }
+    }
+    document.getElementById('btnSave').onclick = async function () {
+      var out = document.getElementById('saveOut');
+      showDeployErr('');
+      out.textContent = 'Saving…';
+      try {
+        var body = {
+          canaryPercent: Number(document.getElementById('canaryPercent').value),
+          activeLane: document.getElementById('activeLane').value,
+          notes: document.getElementById('notes').value,
+        };
+        var r = await fetch('/api/deployment/operator', withTenantHeaders({
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }));
+        var t = await r.text();
+        if (r.status === 403) {
+          showDeployErr('403: для сохранения нужна область org:write.');
+        }
+        out.textContent = r.status + ' ' + t;
+        refresh();
+      } catch (e) {
+        out.textContent = String(e);
+        showDeployErr(String(e));
+      }
+    };
+    refresh();
+  </script>
+</body>
+</html>

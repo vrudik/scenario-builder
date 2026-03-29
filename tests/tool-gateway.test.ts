@@ -121,6 +121,37 @@ describe('ToolGateway', () => {
     expect(response.error?.code).toBe('ACCESS_DENIED');
   });
 
+  it('должен отдавать mockToolConfig без вызова executor', async () => {
+    gateway.setSandboxMode(false);
+
+    const context: ToolRequestContext = {
+      scenarioId: 'test-scenario',
+      executionId: 'test-exec',
+      userId: 'test-user',
+      userRoles: ['user'],
+      mockToolConfig: {
+        'test-tool': { response: { hello: 'mocked' } },
+      },
+    };
+
+    const request: ToolRequest = {
+      toolId: 'test-tool',
+      inputs: { q: 'x' },
+      context,
+    };
+
+    const response = await gateway.execute(
+      request,
+      testTool,
+      async () => {
+        throw new Error('executor should not run when mockToolConfig matches');
+      },
+    );
+
+    expect(response.success).toBe(true);
+    expect(response.outputs).toEqual({ hello: 'mocked' });
+  });
+
   it('метрики: local policy denial с deployment_lane', async () => {
     const spyDeny = vi.spyOn(systemMetrics.gatewayPolicyDenials, 'add');
     const policy: ExecutionPolicy = {
