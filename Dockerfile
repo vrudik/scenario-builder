@@ -17,7 +17,8 @@ RUN npm ci
 
 COPY . .
 RUN npx prisma generate
-RUN npm run build
+# CI Linux runners: avoid OOM during tsc on constrained memory
+RUN NODE_OPTIONS=--max-old-space-size=6144 npm run build
 
 RUN mkdir -p /app/data
 
