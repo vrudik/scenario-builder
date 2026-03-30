@@ -81,5 +81,4 @@ uv.lock
 ansel/
 AppData/
 
-# Prisma
-prisma/migrations/
+# Prisma — migrations must be committed for CI and fresh clones

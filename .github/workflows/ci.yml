@@ -29,6 +29,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prisma (generate + migrate test database)
+        run: npx prisma generate && npx prisma migrate deploy
+        env:
+          DATABASE_URL: file:./dev.db
+
       - name: Typecheck
         run: npm run typecheck --silent
 
